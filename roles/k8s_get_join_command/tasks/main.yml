@@ -1,2 +1,88 @@
 ---
-# tasks file for roles/k8s_get_join_command
+# roles/k8s_get_join_command/tasks/main.yml
+# Génère les commandes "kubeadm join" (worker & control-plane) depuis le primaire.
+
+- name: Fail if primary control-plane host not set
+  ansible.builtin.fail:
+    msg: "You must define 'k8s_primary_cp_host' (the primary control-plane host)."
+  when: (k8s_primary_cp_host | length) == 0
+
+- name: Check if control-plane was initialized
+  ansible.builtin.stat:
+    path: "{{ k8s_admin_conf_path_check }}"
+  register: k8s_admin_conf
+  when: inventory_hostname == k8s_primary_cp_host
+
+- name: Fail if control-plane is not initialized
+  ansible.builtin.fail:
+    msg: "Control-plane not initialized on {{ k8s_primary_cp_host }} (missing {{ k8s_admin_conf_path_check }})."
+  when:
+    - inventory_hostname == k8s_primary_cp_host
+    - not k8s_admin_conf.stat.exists
+
+- name: Upload certs (to get certificate key)
+  ansible.builtin.command: "{{ k8s_kubeadm_bin }} init phase upload-certs --upload-certs"
+  register: certs_out
+  become: yes
+  when:
+    - inventory_hostname == k8s_primary_cp_host
+    - k8s_upload_certs
+
+- name: Extract certificate key
+  ansible.builtin.set_fact:
+    k8s_certificate_key: "{{ certs_out.stdout | regex_search('([a-f0-9]{64})', '\\1') | default('') }}"
+  when:
+    - inventory_hostname == k8s_primary_cp_host
+    - k8s_upload_certs
+
+- name: Fail if certificate key could not be extracted
+  ansible.builtin.fail:
+    msg: >-
+      Could not extract certificate key from kubeadm output.
+      stdout={{ certs_out.stdout | default('') }}
+      stderr={{ certs_out.stderr | default('') }}
+  when:
+    - inventory_hostname == k8s_primary_cp_host
+    - k8s_upload_certs
+    - (k8s_certificate_key | length) == 0
+
+# 3) Générer la commande join pour les workers
+- name: Build kubeadm token create command
+  ansible.builtin.set_fact:
+    _k8s_token_cmd: >-
+      {{ k8s_kubeadm_bin }} token create --print-join-command
+      {{ ('--ttl ' + k8s_join_token_ttl) if (k8s_join_token_ttl | length > 0) else '' }}
+  when: inventory_hostname == k8s_primary_cp_host
+
+- name: Create token and get worker join command
+  ansible.builtin.command: "{{ _k8s_token_cmd }}"
+  register: join_out
+  changed_when: true
+  become: yes
+  when: inventory_hostname == k8s_primary_cp_host
+
+- name: Set worker join command
+  ansible.builtin.set_fact:
+    k8s_join_command_worker: >-
+      {{ (join_out.stdout | trim) ~
+         ((' ' + (k8s_extra_join_args | join(' '))) if (k8s_extra_join_args | length > 0) else '') }}
+  when: inventory_hostname == k8s_primary_cp_host
+
+- name: Build control-plane join command
+  ansible.builtin.set_fact:
+    k8s_join_command_control_plane: >-
+      {{ k8s_join_command_worker }}
+      --control-plane
+      --certificate-key={{ k8s_certificate_key }}
+  when:
+    - inventory_hostname == k8s_primary_cp_host
+    - k8s_upload_certs
+
+- name: Show generated join commands
+  ansible.builtin.debug:
+    msg:
+      - "Worker join: {{ k8s_join_command_worker | default('(not generated)') }}"
+      - "Control-plane join: {{ k8s_join_command_control_plane | default('(not generated)') }}"
+  when:
+    - inventory_hostname == k8s_primary_cp_host
+    - k8s_join_debug

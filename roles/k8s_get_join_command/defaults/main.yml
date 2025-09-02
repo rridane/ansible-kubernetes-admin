@@ -1,2 +1,27 @@
 ---
-# defaults file for roles/k8s_get_join_command
+# Hôte primaire (obligatoire : définis-le dans l’inventaire)
+k8s_primary_cp_host: ""
+
+# Binaire kubeadm
+k8s_kubeadm_bin: "kubeadm"
+
+# TTL du token (ex: 24h0m0s). Vide => laissez kubeadm gérer son TTL par défaut.
+k8s_join_token_ttl: "24h0m0s"
+
+# Générer la clé de certificat pour join control-plane ?
+k8s_upload_certs: true
+
+# Arguments supplémentaires à ajouter aux commandes join
+k8s_extra_join_args: []
+
+# Vérifier que le cluster semble initialisé
+k8s_admin_conf_path_check: "/etc/kubernetes/admin.conf"
+
+# Afficher les commandes en fin de rôle ?
+k8s_join_debug: false
+
+# ---- Sorties (remplies par le rôle) ----
+k8s_join_command_worker: ""
+k8s_join_command_control_plane: ""
+k8s_certificate_key: ""
+

@@ -1,2 +1,61 @@
 ---
-# defaults file for roles/k8s_bootstrap_control_plane
+# Rôle : k8s_bootstrap_control_plane (state=present uniquement)
+# NOTE: le rôle "absent" sera géré par un autre rôle dédié (ex: k8s_cleanup)
+
+# Exécution conditionnelle
+k8s_bootstrap_enabled: true
+
+# Fichiers/paths
+k8s_kubeadm_config_path: "/tmp/kubeadm.yaml"
+k8s_kubeconfig_src: "/etc/kubernetes/admin.conf"
+
+# Où placer le kubeconfig final. Par défaut pour root; tu peux aussi
+# surcharger pour ton {{ ansible_user }} (ex: /home/{{ ansible_user }}/.kube/config).
+k8s_kubeconfig_dest: "/root/.kube/config"
+k8s_kubeconfig_owner: "root"
+k8s_kubeconfig_group: "root"
+k8s_kubeconfig_dir_mode: "0700"
+k8s_kubeconfig_file_mode: "0600"
+
+# kubeadm init
+k8s_kubeadm_bin: "kubeadm"
+k8s_kubeadm_init_extra_args: []   # ex: ["--upload-certs"]
+k8s_kubeadm_timeout: "4m0s"
+
+# Cluster / kubeadm.yaml (InitConfiguration + ClusterConfiguration)
+k8s_advertise_address: "{{ ansible_host | default('0.0.0.0') }}"
+k8s_bind_port: 6443
+
+k8s_control_plane_endpoint: ""     # ex: "api.k8s.example.com:6443"
+k8s_certificates_dir: "/etc/kubernetes/pki"
+k8s_cluster_name: "kubernetes"
+k8s_image_repository: "registry.k8s.io"
+k8s_kubernetes_version: "v1.26.0"
+
+# etcd local
+k8s_etcd_local_enabled: true
+k8s_etcd_data_dir: "/mnt/data/etcd"
+
+# Networking
+k8s_dns_domain: "cluster.local"
+k8s_pod_subnet: "10.244.0.0/16"
+k8s_service_subnet: "10.96.0.0/12"
+
+# API server
+k8s_apiserver_certSANs: []   # ex: ["127.0.0.1","localhost","api.k8s.example.com"]
+k8s_apiserver_extra_args:
+  authorization-mode: "Node,RBAC"
+
+# Controller manager / scheduler: extra args si besoin
+k8s_controller_manager_extra_args: {}
+k8s_scheduler_extra_args: {}
+
+# Sécurité : root-only par défaut ; à activer si tu veux aussi produire un kubeconfig user
+k8s_copy_kubeconfig_for_user_enabled: false
+k8s_copy_kubeconfig_for_user:
+  owner: "{{ ansible_user | default('') }}"
+  group: "{{ ansible_user | default('') }}"
+  dir: "/home/{{ ansible_user | default('') }}/.kube"
+  path: "/home/{{ ansible_user | default('') }}/.kube/config"
+  dir_mode: "0700"
+  file_mode: "0600"

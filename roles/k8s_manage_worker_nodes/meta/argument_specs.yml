@@ -1,0 +1,24 @@
+argument_specs:
+  main:
+    short_description: "Join a node as a Kubernetes worker using a precomputed 'kubeadm join' command."
+    options:
+      k8s_join_command_worker:
+        type: str
+        required: true
+        description: "Full 'kubeadm join ...' command for workers."
+      k8s_joined_check_path:
+        type: str
+        default: "/etc/kubernetes/kubelet.conf"
+        description: "Path whose presence indicates the node is already joined."
+      k8s_manage_kubelet:
+        type: bool
+        default: true
+        description: "Ensure kubelet service is enabled and started after join."
+      k8s_kubelet_service_name:
+        type: str
+        default: "kubelet"
+        description: "Systemd service name for kubelet."
+      k8s_join_debug:
+        type: bool
+        default: false
+        description: "If true, prints the join command in debug."

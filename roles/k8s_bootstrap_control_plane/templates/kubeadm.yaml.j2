@@ -1,0 +1,50 @@
+# templates/kubeadm.yaml.j2
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: InitConfiguration
+localAPIEndpoint:
+  advertiseAddress: {{ k8s_advertise_address }}
+  bindPort: {{ k8s_bind_port }}
+---
+apiVersion: kubeadm.k8s.io/v1beta3
+kind: ClusterConfiguration
+
+clusterName: {{ k8s_cluster_name }}
+kubernetesVersion: {{ k8s_kubernetes_version }}
+controlPlaneEndpoint: {{ k8s_control_plane_endpoint }}
+certificatesDir: {{ k8s_certificates_dir }}
+imageRepository: {{ k8s_image_repository }}
+
+apiServer:
+  certSANs:
+{% for san in k8s_apiserver_certSANs %}
+    - {{ san }}
+{% endfor %}
+  extraArgs:
+{% for k, v in k8s_apiserver_extra_args.items() %}
+    {{ k }}: {{ v }}
+{% endfor %}
+  timeoutForControlPlane: {{ k8s_kubeadm_timeout }}
+
+controllerManager:
+  extraArgs:
+{% for k, v in k8s_controller_manager_extra_args.items() %}
+    {{ k }}: {{ v }}
+{% endfor %}
+
+scheduler:
+  extraArgs:
+{% for k, v in k8s_scheduler_extra_args.items() %}
+    {{ k }}: {{ v }}
+{% endfor %}
+
+networking:
+  dnsDomain: {{ k8s_dns_domain }}
+  podSubnet: {{ k8s_pod_subnet }}
+  serviceSubnet: {{ k8s_service_subnet }}
+
+{% if k8s_etcd_local_enabled %}
+etcd:
+  local:
+    dataDir: {{ k8s_etcd_data_dir }}
+{% endif %}

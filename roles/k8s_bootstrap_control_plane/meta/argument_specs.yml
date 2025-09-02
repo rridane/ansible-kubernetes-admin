@@ -1,0 +1,158 @@
+argument_specs:
+  main:
+    short_description: "Bootstrap du control-plane Kubernetes via kubeadm (state=present)."
+    options:
+
+      k8s_bootstrap_enabled:
+        type: bool
+        default: true
+        description: "Active/disable le rôle."
+
+      k8s_kubeadm_config_path:
+        type: str
+        default: "/tmp/kubeadm.yaml"
+        description: "Chemin du fichier kubeadm.yaml rendu par template."
+
+      k8s_kubeconfig_src:
+        type: str
+        default: "/etc/kubernetes/admin.conf"
+        description: "Chemin source du kubeconfig généré par kubeadm."
+
+      k8s_kubeconfig_dest:
+        type: str
+        default: "/root/.kube/config"
+        description: "Chemin de destination du kubeconfig final (compte root par défaut)."
+
+      k8s_kubeconfig_owner:
+        type: str
+        default: "root"
+        description: "Propriétaire du kubeconfig final."
+
+      k8s_kubeconfig_group:
+        type: str
+        default: "root"
+        description: "Groupe du kubeconfig final."
+
+      k8s_kubeconfig_dir_mode:
+        type: str
+        default: "0700"
+        description: "Mode du répertoire ~/.kube."
+
+      k8s_kubeconfig_file_mode:
+        type: str
+        default: "0600"
+        description: "Mode du fichier kubeconfig."
+
+      k8s_kubeadm_bin:
+        type: str
+        default: "kubeadm"
+        description: "Binaire kubeadm (chemin si non dans PATH)."
+
+      k8s_kubeadm_init_extra_args:
+        type: list
+        elements: str
+        default: []
+        description: "Arguments supplémentaires passés à 'kubeadm init --config ...'."
+
+      k8s_kubeadm_timeout:
+        type: str
+        default: "4m0s"
+        description: "Timeout (format Go) pour l'init du control-plane."
+
+      k8s_advertise_address:
+        type: str
+        default: "{{ ansible_host | default('0.0.0.0') }}"
+        description: "Adresse IP d'advertise du kube-apiserver."
+
+      k8s_bind_port:
+        type: int
+        default: 6443
+        description: "Port d'écoute de l'API locale dans InitConfiguration.localAPIEndpoint."
+
+      k8s_control_plane_endpoint:
+        type: str
+        default: ""
+        description: "Endpoint HA (DNS:port) pour controlPlaneEndpoint. Requis en HA."
+
+      k8s_certificates_dir:
+        type: str
+        default: "/etc/kubernetes/pki"
+        description: "Répertoire des certificats kubeadm."
+
+      k8s_cluster_name:
+        type: str
+        default: "kubernetes"
+        description: "Nom du cluster."
+
+      k8s_image_repository:
+        type: str
+        default: "registry.k8s.io"
+        description: "Registry d’images kubeadm."
+
+      k8s_kubernetes_version:
+        type: str
+        default: "v1.26.0"
+        description: "Version cible Kubernetes (ex: v1.30.4, ou une série)."
+
+      k8s_etcd_local_enabled:
+        type: bool
+        default: true
+        description: "Active etcd local (géré par kubeadm)."
+
+      k8s_etcd_data_dir:
+        type: str
+        default: "/mnt/data/etcd"
+        description: "Répertoire data etcd quand etcd local est activé."
+
+      k8s_dns_domain:
+        type: str
+        default: "cluster.local"
+        description: "Nom de domaine du cluster."
+
+      k8s_pod_subnet:
+        type: str
+        default: "10.244.0.0/16"
+        description: "CIDR des Pods (doit matcher ton CNI)."
+
+      k8s_service_subnet:
+        type: str
+        default: "10.96.0.0/12"
+        description: "CIDR des Services."
+
+      k8s_apiserver_certSANs:
+        type: list
+        elements: str
+        default: []
+        description: "Liste des SANs supplémentaires pour le certificat du kube-apiserver."
+
+      k8s_apiserver_extra_args:
+        type: dict
+        default:
+          authorization-mode: "Node,RBAC"
+        description: "Clés/valeurs passées à apiServer.extraArgs."
+
+      k8s_controller_manager_extra_args:
+        type: dict
+        default: {}
+        description: "Clés/valeurs pour controllerManager.extraArgs."
+
+      k8s_scheduler_extra_args:
+        type: dict
+        default: {}
+        description: "Clés/valeurs pour scheduler.extraArgs."
+
+      k8s_copy_kubeconfig_for_user_enabled:
+        type: bool
+        default: false
+        description: "Si true, copie aussi un kubeconfig pour {{ ansible_user }}."
+
+      k8s_copy_kubeconfig_for_user:
+        type: dict
+        default:
+          owner: "{{ ansible_user | default('') }}"
+          group: "{{ ansible_user | default('') }}"
+          dir: "/home/{{ ansible_user | default('') }}/.kube"
+          path: "/home/{{ ansible_user | default('') }}/.kube/config"
+          dir_mode: "0700"
+          file_mode: "0600"
+        description: "Paramètres de copie pour le kubeconfig utilisateur."

@@ -1,2 +1,15 @@
 ---
-# defaults file for roles/k8s_manage_worker_nodes
+# k8s_manage_worker_nodes defaults
+
+# Command 'kubeadm join' (must be provided by caller)
+k8s_join_command_worker: ""
+
+# Idempotence: if this file exists, node is considered joined
+k8s_joined_check_path: "/etc/kubernetes/kubelet.conf"
+
+# Manage kubelet service after join
+k8s_manage_kubelet: true
+k8s_kubelet_service_name: "kubelet"
+
+# Debug
+k8s_join_debug: false

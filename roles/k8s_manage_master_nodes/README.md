@@ -1,31 +1,50 @@
 Role Name
 =========
 
-A brief description of the role goes here.
+`k8s_manage_master_nodes` — Ce rôle permet de joindre un nœud comme **control-plane additionnel** dans un cluster Kubernetes, en utilisant une commande `kubeadm join` générée au préalable (cf. rôle `k8s_get_join_command`).
 
 Requirements
 ------------
 
-Any pre-requisites that may not be covered by Ansible itself or the role should be mentioned here. For instance, if the role uses the EC2 module, it may be a good idea to mention in this section that the boto package is required.
+- Le cluster doit être déjà initialisé (rôle `k8s_bootstrap_control_plane`).
+- Une commande `k8s_join_command_control_plane` valide doit être fournie (souvent via `hostvars[k8s_primary_cp_host]`).
+- Paquets Kubernetes installés (`kubeadm`, `kubelet`).
+- Accès root (`become: yes`).
+- Python 3 et Ansible ≥ 2.15.
 
 Role Variables
 --------------
 
-A description of the settable variables for this role should go here, including any variables that are in defaults/main.yml, vars/main.yml, and any variables that can/should be set via parameters to the role. Any variables that are read from other roles and/or the global scope (ie. hostvars, group vars, etc.) should be mentioned here as well.
+Variables principales (définies dans `defaults/main.yml`) :
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `k8s_join_command_control_plane` | (obligatoire) | Commande complète `kubeadm join ... --control-plane --certificate-key=...`. |
+| `k8s_joined_check_path` | `/etc/kubernetes/kubelet.conf` | Fichier dont la présence indique que le nœud est déjà joint. |
+| `k8s_manage_kubelet` | `true` | Si vrai, assure que le service `kubelet` est activé et démarré. |
+| `k8s_kubelet_service_name` | `kubelet` | Nom du service systemd à gérer. |
+| `k8s_join_debug` | `false` | Si vrai, affiche la commande join en debug. |
 
 Dependencies
 ------------
 
-A list of other roles hosted on Galaxy should go here, plus any details in regards to parameters that may need to be set for other roles, or variables that are used from other roles.
+Aucune dépendance externe.  
+Ce rôle est généralement utilisé après :
+- `k8s_bootstrap_control_plane`
+- `k8s_get_join_command`
 
 Example Playbook
 ----------------
 
-Including an example of how to use your role (for instance, with variables passed in as parameters) is always nice for users too:
-
-    - hosts: servers
-      roles:
-         - { role: username.rolename, x: 42 }
+```yaml
+- name: Join secondary control-planes
+  hosts: masters:!kmaster1
+  become: yes
+  vars:
+    k8s_join_command_control_plane: "{{ hostvars[k8s_primary_cp_host].k8s_join_command_control_plane }}"
+  roles:
+    - role: rridane.kubernetes.k8s_manage_master_nodes
+```
 
 License
 -------

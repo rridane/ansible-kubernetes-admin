@@ -1,2 +1,38 @@
 ---
-# tasks file for roles/k8s_manage_master_nodes
+- name: Fail if control-plane join command is not provided
+  ansible.builtin.fail:
+    msg: "You must define 'k8s_join_command_control_plane' (full kubeadm join command for control-plane)."
+  when: (k8s_join_command_control_plane | trim) == ""
+
+- name: Show control-plane join command (debug)
+  ansible.builtin.debug:
+    var: k8s_join_command_control_plane
+  when: k8s_join_debug
+
+- name: Check if node already joined
+  ansible.builtin.stat:
+    path: "{{ k8s_joined_check_path }}"
+  register: _k8s_joined
+
+- name: Join this node as control-plane
+  ansible.builtin.shell: "{{ k8s_join_command_control_plane }}"
+  args:
+    executable: /bin/bash
+  become: yes
+  register: _join_cp_out
+  changed_when: true
+  when: not _k8s_joined.stat.exists
+
+- name: Ensure kubelet is enabled
+  ansible.builtin.systemd:
+    name: "{{ k8s_kubelet_service_name }}"
+    enabled: true
+  become: yes
+  when: k8s_manage_kubelet
+
+- name: Ensure kubelet is started
+  ansible.builtin.systemd:
+    name: "{{ k8s_kubelet_service_name }}"
+    state: started
+  become: yes
+  when: k8s_manage_kubelet

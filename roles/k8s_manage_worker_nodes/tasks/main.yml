@@ -1,2 +1,45 @@
 ---
-# tasks file for roles/k8s_manage_worker_nodes
+# roles/k8s_manage_worker_nodes/tasks/main.yml
+
+# 0) Sanity check
+- name: Fail if worker join command is not provided
+  ansible.builtin.fail:
+    msg: "You must define 'k8s_join_command_worker' (full kubeadm join command for workers)."
+  when: (k8s_join_command_worker | trim) == ""
+
+# 1) Debug (optional)
+- name: Show worker join command (debug)
+  ansible.builtin.debug:
+    var: k8s_join_command_worker
+  when: k8s_join_debug
+
+# 2) Check if node already joined
+- name: Check if node already joined
+  ansible.builtin.stat:
+    path: "{{ k8s_joined_check_path }}"
+  register: _k8s_joined
+
+# 3) Join worker (only if not joined)
+- name: Join this node as worker
+  ansible.builtin.shell: "{{ k8s_join_command_worker }}"
+  args:
+    executable: /bin/bash
+  become: yes
+  register: _join_worker_out
+  changed_when: true
+  when: not _k8s_joined.stat.exists
+
+# 4) Ensure kubelet is enabled/started (optional)
+- name: Ensure kubelet is enabled
+  ansible.builtin.systemd:
+    name: "{{ k8s_kubelet_service_name }}"
+    enabled: true
+  become: yes
+  when: k8s_manage_kubelet
+
+- name: Ensure kubelet is started
+  ansible.builtin.systemd:
+    name: "{{ k8s_kubelet_service_name }}"
+    state: started
+  become: yes
+  when: k8s_manage_kubelet

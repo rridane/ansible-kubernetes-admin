@@ -1,2 +1,85 @@
 ---
-# tasks file for roles/k8s_bootstrap_control_plane
+# roles/k8s_bootstrap_control_plane/tasks/main.yml
+
+- name: Fail if primary control-plane host not set
+  ansible.builtin.fail:
+    msg: "You must define 'k8s_primary_cp_host' (the primary control-plane host)."
+  when: k8s_primary_cp_host | length == 0
+
+- name: Compute if this host is the primary control-plane
+  set_fact:
+    k8s_is_primary_cp: "{{ inventory_hostname == k8s_primary_cp_host }}"
+    k8s_admin_conf_path_check: "/etc/kubernetes/admin.conf"
+
+- name: Check if kubeadm was already initialized
+  ansible.builtin.stat:
+    path: "{{ k8s_admin_conf_path_check }}"
+  register: k8s_admin_conf
+
+- name: Render kubeadm config on primary control-plane
+  ansible.builtin.template:
+    src: "kubeadm.yaml.j2"
+    dest: "{{ k8s_kubeadm_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: k8s_is_primary_cp
+
+- name: Build kubeadm init command
+  ansible.builtin.set_fact:
+    _kubeadm_init_cmd: >-
+      {{ k8s_kubeadm_bin }} init
+      --config {{ k8s_kubeadm_config_path }}
+      {{ (k8s_kubeadm_init_extra_args | join(' ')) if (k8s_kubeadm_init_extra_args|length > 0) else '' }}
+  when: k8s_is_primary_cp
+
+# 4) Initialiser le control-plane (avec creates: pour l’idempotence).
+- name: Initialize control-plane with kubeadm
+  ansible.builtin.command: "{{ _kubeadm_init_cmd }}"
+  args:
+    creates: "{{ k8s_admin_conf_path_check }}"
+  when:
+    - k8s_is_primary_cp
+    - not k8s_admin_conf.stat.exists
+
+- name: Ensure kubeconfig directory exists (root)
+  ansible.builtin.file:
+    path: "{{ (k8s_kubeconfig_dest | dirname) }}"
+    state: directory
+    owner: "{{ k8s_kubeconfig_owner }}"
+    group: "{{ k8s_kubeconfig_group }}"
+    mode: "{{ k8s_kubeconfig_dir_mode }}"
+  when: k8s_bootstrap_enabled
+
+- name: Copy kubeconfig for root
+  ansible.builtin.copy:
+    src: "{{ k8s_kubeconfig_src }}"
+    dest: "{{ k8s_kubeconfig_dest }}"
+    remote_src: true
+    owner: "{{ k8s_kubeconfig_owner }}"
+    group: "{{ k8s_kubeconfig_group }}"
+    mode: "{{ k8s_kubeconfig_file_mode }}"
+  when: k8s_bootstrap_enabled
+
+- name: Ensure kubeconfig directory exists (user)
+  ansible.builtin.file:
+    path: "{{ k8s_copy_kubeconfig_for_user.dir }}"
+    state: directory
+    owner: "{{ k8s_copy_kubeconfig_for_user.owner }}"
+    group: "{{ k8s_copy_kubeconfig_for_user.group }}"
+    mode: "{{ k8s_copy_kubeconfig_for_user.dir_mode }}"
+  when:
+    - k8s_copy_kubeconfig_for_user_enabled
+    - (k8s_copy_kubeconfig_for_user.owner | length) > 0
+
+- name: Copy kubeconfig for user
+  ansible.builtin.copy:
+    src: "{{ k8s_kubeconfig_src }}"
+    dest: "{{ k8s_copy_kubeconfig_for_user.path }}"
+    remote_src: true
+    owner: "{{ k8s_copy_kubeconfig_for_user.owner }}"
+    group: "{{ k8s_copy_kubeconfig_for_user.group }}"
+    mode: "{{ k8s_copy_kubeconfig_for_user.file_mode }}"
+  when:
+    - k8s_copy_kubeconfig_for_user_enabled
+    - (k8s_copy_kubeconfig_for_user.owner | length) > 0

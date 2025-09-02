@@ -1,0 +1,63 @@
+argument_specs:
+  main:
+    short_description: "Génère les commandes kubeadm join (worker & control-plane) depuis le nœud primaire."
+    options:
+
+      # Qui est le primaire ? => obligatoire (on préfère l'explicite)
+      k8s_primary_cp_host:
+        type: str
+        required: true
+        description: "Nom inventory de l’hôte primaire du control-plane."
+
+      # Binaire kubeadm & comportements
+      k8s_kubeadm_bin:
+        type: str
+        default: "kubeadm"
+        description: "Chemin/binaire de kubeadm."
+
+      # Token TTL (format Go, ex: 24h0m0s). Vide => TTL par défaut de kubeadm.
+      k8s_join_token_ttl:
+        type: str
+        default: "24h0m0s"
+        description: "Durée de validité du token kubeadm (ex: 24h0m0s)."
+
+      # Upload certs pour join control-plane ?
+      k8s_upload_certs:
+        type: bool
+        default: true
+        description: "Exécute 'kubeadm init phase upload-certs --upload-certs' pour générer la clé de certificat."
+
+      # Arguments supplémentaires à ajouter aux 'join' (pour worker et/ou control-plane)
+      k8s_extra_join_args:
+        type: list
+        elements: str
+        default: []
+        description: "Arguments additionnels à concaténer aux commandes join."
+
+      # Vérification idempotence de l’init
+      k8s_admin_conf_path_check:
+        type: str
+        default: "/etc/kubernetes/admin.conf"
+        description: "Chemin dont l’existence confirme que le control-plane a été initialisé."
+
+      # Debug
+      k8s_join_debug:
+        type: bool
+        default: false
+        description: "Affiche les commandes en debug à la fin."
+
+      # Sorties (facts) — exposées par le rôle
+      k8s_join_command_worker:
+        type: str
+        default: ""
+        description: "Commande join pour les workers (sortie)."
+
+      k8s_join_command_control_plane:
+        type: str
+        default: ""
+        description: "Commande join pour un control-plane additionnel (sortie)."
+
+      k8s_certificate_key:
+        type: str
+        default: ""
+        description: "Clé de certificats (sortie) utilisée pour le join control-plane."
