@@ -1,47 +1,78 @@
-# templates/kubeadm.yaml.j2
 ---
-apiVersion: kubeadm.k8s.io/v1beta3
+# --- InitConfiguration (local au noeud) ---
+apiVersion: kubeadm.k8s.io/v1beta4
 kind: InitConfiguration
 localAPIEndpoint:
   advertiseAddress: {{ k8s_advertise_address }}
   bindPort: {{ k8s_bind_port }}
----
-apiVersion: kubeadm.k8s.io/v1beta3
-kind: ClusterConfiguration
+{% if k8s_node_registration | default({}) %}
+nodeRegistration:
+{% for k, v in k8s_node_registration.items() %}
+  {{ k }}: {{ v }}
+{% endfor %}
+{% endif %}
+{% if k8s_timeout_for_control_plane | default('') | length > 0 %}
+timeouts:
+  controlPlaneComponentHealthCheck: {{ k8s_timeout_for_control_plane }}
+{% endif %}
 
+---
+# --- ClusterConfiguration (global cluster) ---
+apiVersion: kubeadm.k8s.io/v1beta4
+kind: ClusterConfiguration
 clusterName: {{ k8s_cluster_name }}
+{% if k8s_kubernetes_version | default('') | length > 0 %}
 kubernetesVersion: {{ k8s_kubernetes_version }}
-controlPlaneEndpoint: {{ k8s_control_plane_endpoint }}
+{% endif %}
+controlPlaneEndpoint: "{{ k8s_control_plane_endpoint }}"
 certificatesDir: {{ k8s_certificates_dir }}
 imageRepository: {{ k8s_image_repository }}
-
-apiServer:
-  certSANs:
-{% for san in k8s_apiserver_certSANs %}
-    - {{ san }}
-{% endfor %}
-  extraArgs:
-{% for k, v in k8s_apiserver_extra_args.items() %}
-    {{ k }}: {{ v }}
-{% endfor %}
-  timeoutForControlPlane: {{ k8s_kubeadm_timeout }}
-
-controllerManager:
-  extraArgs:
-{% for k, v in k8s_controller_manager_extra_args.items() %}
-    {{ k }}: {{ v }}
-{% endfor %}
-
-scheduler:
-  extraArgs:
-{% for k, v in k8s_scheduler_extra_args.items() %}
-    {{ k }}: {{ v }}
-{% endfor %}
 
 networking:
   dnsDomain: {{ k8s_dns_domain }}
   podSubnet: {{ k8s_pod_subnet }}
   serviceSubnet: {{ k8s_service_subnet }}
+
+{% set _sans = k8s_apiserver_certSANs | default([]) %}
+{% set _apiextra = k8s_apiserver_extra_args | default({}) %}
+apiServer:
+{% if _sans | length > 0 %}
+  certSANs:
+{% for san in _sans %}
+    - {{ san }}
+{% endfor %}
+{% endif %}
+{% if _apiextra | length > 0 %}
+  extraArgs:
+{% for k, v in _apiextra.items() %}
+    - name: {{ k }}
+      value: "{{ v }}"
+{% endfor %}
+{% endif %}
+
+{% set _cmextra = k8s_controller_manager_extra_args | default({}) %}
+{% if _cmextra | length > 0 %}
+controllerManager:
+  extraArgs:
+{% for k, v in _cmextra.items() %}
+    - name: {{ k }}
+      value: "{{ v }}"
+{% endfor %}
+{% else %}
+controllerManager: {}
+{% endif %}
+
+{% set _schextra = k8s_scheduler_extra_args | default({}) %}
+{% if _schextra | length > 0 %}
+scheduler:
+  extraArgs:
+{% for k, v in _schextra.items() %}
+    - name: {{ k }}
+      value: "{{ v }}"
+{% endfor %}
+{% else %}
+scheduler: {}
+{% endif %}
 
 {% if k8s_etcd_local_enabled %}
 etcd:

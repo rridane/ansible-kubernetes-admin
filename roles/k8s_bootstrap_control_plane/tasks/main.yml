@@ -1,5 +1,14 @@
 ---
-# roles/k8s_bootstrap_control_plane/tasks/main.yml
+- name: Detect kubeadm version (short)
+  command: kubeadm version -o short
+  register: _kubeadm_ver
+  changed_when: false
+
+- name: Set k8s_kubernetes_version if empty (match kubeadm)
+  set_fact:
+    k8s_kubernetes_version: "{{ _kubeadm_ver.stdout | trim }}"
+  when:
+    - (k8s_kubernetes_version | default('')) | length == 0
 
 - name: Fail if primary control-plane host not set
   ansible.builtin.fail:

@@ -20,7 +20,7 @@ k8s_kubeconfig_file_mode: "0600"
 # kubeadm init
 k8s_kubeadm_bin: "kubeadm"
 k8s_kubeadm_init_extra_args: []   # ex: ["--upload-certs"]
-k8s_kubeadm_timeout: "4m0s"
+k8s_timeout_for_control_plane: "4m0s"
 
 # Cluster / kubeadm.yaml (InitConfiguration + ClusterConfiguration)
 k8s_advertise_address: "{{ ansible_host | default('0.0.0.0') }}"

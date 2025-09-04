@@ -54,7 +54,7 @@ argument_specs:
         default: []
         description: "Arguments supplémentaires passés à 'kubeadm init --config ...'."
 
-      k8s_kubeadm_timeout:
+      k8s_timeout_for_control_plane:
         type: str
         default: "4m0s"
         description: "Timeout (format Go) pour l'init du control-plane."
