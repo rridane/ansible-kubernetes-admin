@@ -1,46 +1,35 @@
+# Ansible Role: k8s_manage_worker_nodes
 
----
+`k8s_manage_worker_nodes` — This role allows joining a node as a **worker** in a Kubernetes cluster, using a `kubeadm join` command generated beforehand (see role `k8s_get_join_command`).
 
-# README pour `k8s_manage_worker_nodes`
+## Requirements
 
-```markdown
-Role Name
-=========
+- The cluster must already be initialized (role `k8s_bootstrap_control_plane`).
+- A valid `k8s_join_command_worker` command must be provided (often via `hostvars[k8s_primary_cp_host]`).
+- Kubernetes packages installed (`kubeadm`, `kubelet`).
+- Root access (`become: yes`).
+- Python 3 and Ansible ≥ 2.15.
 
-`k8s_manage_worker_nodes` — Ce rôle permet de joindre un nœud comme **worker** dans un cluster Kubernetes, en utilisant une commande `kubeadm join` générée au préalable (cf. rôle `k8s_get_join_command`).
+## Role Variables
 
-Requirements
-------------
-
-- Le cluster doit être déjà initialisé (rôle `k8s_bootstrap_control_plane`).
-- Une commande `k8s_join_command_worker` valide doit être fournie (souvent via `hostvars[k8s_primary_cp_host]`).
-- Paquets Kubernetes installés (`kubeadm`, `kubelet`).
-- Accès root (`become: yes`).
-- Python 3 et Ansible ≥ 2.15.
-
-Role Variables
---------------
-
-Variables principales (définies dans `defaults/main.yml`) :
+Main variables (defined in `defaults/main.yml`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `k8s_join_command_worker` | (obligatoire) | Commande complète `kubeadm join ...` pour un worker. |
-| `k8s_joined_check_path` | `/etc/kubernetes/kubelet.conf` | Fichier dont la présence indique que le nœud est déjà joint. |
-| `k8s_manage_kubelet` | `true` | Si vrai, assure que le service `kubelet` est activé et démarré. |
-| `k8s_kubelet_service_name` | `kubelet` | Nom du service systemd à gérer. |
-| `k8s_join_debug` | `false` | Si vrai, affiche la commande join en debug. |
+| `k8s_join_command_worker` | (required) | Full `kubeadm join ...` command for a worker. |
+| `k8s_joined_check_path` | `/etc/kubernetes/kubelet.conf` | File whose presence indicates that the node is already joined. |
+| `k8s_manage_kubelet` | `true` | If true, ensures that the `kubelet` service is enabled and started. |
+| `k8s_kubelet_service_name` | `kubelet` | Name of the systemd service to manage. |
+| `k8s_join_debug` | `false` | If true, prints the join command in debug. |
 
-Dependencies
-------------
+## Dependencies
 
-Aucune dépendance externe.  
-Ce rôle est généralement utilisé après :
+No external dependencies.  
+This role is generally used after:
 - `k8s_bootstrap_control_plane`
 - `k8s_get_join_command`
 
-Example Playbook
-----------------
+## Example Playbook
 
 ```yaml
 - name: Join workers to the cluster
@@ -52,12 +41,6 @@ Example Playbook
     - role: rridane.kubernetes.k8s_manage_worker_nodes
 ```
 
-License
--------
+## License
 
 BSD
-
-Author Information
-------------------
-
-An optional section for the role authors to include contact information, or a website (HTML is not allowed).
