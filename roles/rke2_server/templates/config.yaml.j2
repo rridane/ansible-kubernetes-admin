@@ -1,0 +1,16 @@
+# config.yaml — généré par Ansible (rôle rke2_server) — NE PAS ÉDITER
+{% if _rke2_is_primary %}
+# ===================================================================
+# MODE BOOTSTRAP — premier serveur (amorce sur son IP).
+# Ni `server:` ni `token:` : RKE2 génère le token du cluster.
+# ===================================================================
+{% else %}
+# ===================================================================
+# MODE JOIN — rejoint le cluster via `rke2_server_url`.
+# ===================================================================
+server: {{ rke2_server_url }}
+token: {{ rke2_join_token }}
+{% endif %}
+{% if rke2_config | length > 0 %}
+{{ rke2_config | to_nice_yaml | trim }}
+{% endif %}

@@ -1,0 +1,87 @@
+---
+# roles/rke2_server/tasks/main.yml
+# Installe et configure un serveur RKE2. Deux modes selon rke2_primary :
+#   - BOOTSTRAP (ce nœud == rke2_primary) : amorce le cluster sur son IP.
+#   - JOIN      (les autres serveurs)     : rejoignent via la VIP + token.
+# En mode JOIN, le token vient du rôle rke2_fetch_token (variable rke2_join_token).
+
+- name: "Mode | Fail if rke2_primary is not set"
+  ansible.builtin.fail:
+    msg: "You must define 'rke2_primary' (inventory hostname of the bootstrap server)."
+  when: (rke2_primary | trim) == ""
+
+- name: "Mode | Fail if join token missing (join mode)"
+  ansible.builtin.fail:
+    msg: "En mode JOIN, 'rke2_join_token' doit être fourni (jouer rke2_fetch_token avant)."
+  when:
+    - not _rke2_is_primary
+    - (rke2_join_token | default('') | trim) == ""
+
+- name: "Mode | Fail if server URL missing (join mode)"
+  ansible.builtin.fail:
+    msg: "En mode JOIN, 'rke2_server_url' doit être défini (ex: https://<vip-ou-master>:9345)."
+  when:
+    - not _rke2_is_primary
+    - (rke2_server_url | default('') | trim) == ""
+
+- name: "Mode | Announce"
+  ansible.builtin.debug:
+    msg: >-
+      rke2_server on {{ inventory_hostname }} —
+      mode={{ _rke2_is_primary | ternary('BOOTSTRAP (premier serveur)', 'JOIN (via VIP)') }}
+
+# --- Installation (get.rke2.io) --------------------------------------------
+- name: "Install | Download RKE2 installer"
+  ansible.builtin.get_url:
+    url: "{{ rke2_install_url }}"
+    dest: /usr/local/bin/rke2-install.sh
+    mode: "0755"
+  become: true
+
+- name: "Install | Run RKE2 installer (server)"
+  ansible.builtin.command:
+    cmd: /usr/local/bin/rke2-install.sh
+  args:
+    creates: /usr/local/bin/rke2
+  environment:
+    INSTALL_RKE2_TYPE: server
+    INSTALL_RKE2_VERSION: "{{ rke2_version }}"
+    INSTALL_RKE2_CHANNEL: "{{ rke2_channel }}"
+  become: true
+
+# --- Configuration ----------------------------------------------------------
+- name: "Config | Ensure /etc/rancher/rke2 exists"
+  ansible.builtin.file:
+    path: /etc/rancher/rke2
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: "Config | Render config.yaml"
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: /etc/rancher/rke2/config.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  notify: restart rke2-server
+
+# --- Service ----------------------------------------------------------------
+- name: "Service | Enable and start rke2-server"
+  ansible.builtin.systemd:
+    name: rke2-server
+    enabled: true
+    state: started
+    daemon_reload: true
+  become: true
+
+# --- Attente du bootstrap (primaire) ---------------------------------------
+- name: "Bootstrap | Wait for kubeconfig on the primary"
+  ansible.builtin.wait_for:
+    path: /etc/rancher/rke2/rke2.yaml
+    timeout: "{{ rke2_bootstrap_timeout }}"
+  become: true
+  when: _rke2_is_primary

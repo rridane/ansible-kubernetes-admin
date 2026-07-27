@@ -1,0 +1,22 @@
+---
+# roles/rke2_fetch_token/tasks/main.yml
+# Récupère le token de cluster RKE2 en le lisant EN DIRECT sur le primaire
+# (slurp délégué). Expose la variable `rke2_join_token`. Rien n'est persisté.
+# Réutilisé par : rke2_server (mode join), rke2_agent, et l'ajout d'un nœud a posteriori.
+
+- name: "Fetch | Fail if rke2_primary is not set"
+  ansible.builtin.fail:
+    msg: "You must define 'rke2_primary' (inventory hostname of the bootstrap server)."
+  when: (rke2_primary | trim) == ""
+
+- name: "Fetch | Read cluster token from the primary"
+  ansible.builtin.slurp:
+    src: "{{ rke2_token_path }}"
+  delegate_to: "{{ rke2_primary }}"
+  become: true
+  register: _rke2_tok
+
+- name: "Fetch | Expose token as rke2_join_token (never logged)"
+  ansible.builtin.set_fact:
+    rke2_join_token: "{{ _rke2_tok.content | b64decode | trim }}"
+  no_log: true

@@ -1,0 +1,28 @@
+---
+# rke2_server defaults
+
+# Nom d'inventaire du serveur d'amorçage. Détermine le MODE :
+#   inventory_hostname == rke2_primary  => BOOTSTRAP ; sinon => JOIN. Requis.
+rke2_primary: ""
+
+# --- Mode JOIN uniquement (injectés par le rôle, hors rke2_config) ----------
+# Endpoint contacté pour rejoindre (ligne `server:`). Ex : "https://10.30.1.5:9345".
+rke2_server_url: ""
+# Token de jointure, fourni par le rôle rke2_fetch_token.
+rke2_join_token: ""
+
+# --- Installation -----------------------------------------------------------
+# Version RKE2 (vide => suit le canal). Ex : "v1.31.4+rke2r1"
+rke2_version: ""
+rke2_channel: stable
+rke2_install_url: "https://get.rke2.io"
+
+# --- Configuration RKE2 (pass-through 1:1 vers /etc/rancher/rke2/config.yaml)
+# Dict libre : cni, disable-kube-proxy, cluster-cidr, service-cidr, tls-san,
+# node-ip, disable, kube-apiserver-arg... L'opinion (cilium, kube-proxy-free…)
+# vit chez le consommateur (group_vars de l'inventaire). `server:`/`token:` sont
+# gérés par le rôle et ne doivent PAS figurer ici.
+rke2_config: {}
+
+# Attente du kubeconfig au bootstrap (secondes)
+rke2_bootstrap_timeout: 600

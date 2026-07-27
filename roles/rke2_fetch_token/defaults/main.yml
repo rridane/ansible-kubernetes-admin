@@ -1,0 +1,9 @@
+---
+# rke2_fetch_token defaults
+
+# Nom d'inventaire du serveur d'amorçage (sur lequel lire le token). Requis.
+rke2_primary: ""
+
+# Chemin du token côté primaire. Le node-token embarque le hash de la CA
+# (pinning) — préférable au token nu.
+rke2_token_path: "/var/lib/rancher/rke2/server/node-token"

@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: rke2_fetch_token
+  author: rridane
+  description: >
+    Lit le token de cluster RKE2 en direct sur le primaire (slurp délégué) et
+    l'expose en fact rke2_join_token, sans rien persister. Analogue RKE2 de
+    k8s_get_join_command ; consommé par rke2_server (join) et rke2_agent.
+  license: MIT
+  min_ansible_version: "2.14"
+  galaxy_tags:
+    - rke2
+    - kubernetes
+    - token
+dependencies: []

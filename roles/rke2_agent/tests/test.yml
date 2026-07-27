@@ -1,0 +1,8 @@
+---
+- hosts: localhost
+  remote_user: root
+  vars:
+    rke2_server_url: "https://127.0.0.1:9345"
+    rke2_join_token: "dummy-token-for-syntax-check"
+  roles:
+    - roles/rke2_agent

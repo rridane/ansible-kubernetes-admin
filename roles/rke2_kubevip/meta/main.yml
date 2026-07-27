@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  role_name: rke2_kubevip
+  author: rridane
+  description: >
+    Dépose le manifest kube-vip (DaemonSet + RBAC) dans le dossier d'auto-deploy
+    RKE2 (server/manifests). VIP de l'API en ARP L2 avec leader election (un seul
+    annonceur, coordination via Lease Kubernetes). À jouer sur le primaire.
+  license: MIT
+  min_ansible_version: "2.14"
+  galaxy_tags:
+    - rke2
+    - kubernetes
+    - kube-vip
+    - vip
+    - keepalived
+dependencies: []

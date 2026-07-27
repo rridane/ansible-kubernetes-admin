@@ -1,0 +1,30 @@
+---
+argument_specs:
+  main:
+    short_description: "Dépose un DaemonSet kube-vip (VIP API, ARP L2, leader election) via server/manifests."
+    options:
+      kubevip_vip:
+        type: str
+        required: true
+        description:
+          - "Adresse de la VIP de l'API (ARP L2)."
+      kubevip_interface:
+        type: str
+        default: ""
+        description:
+          - "Interface portant la VIP. Vide => auto-détection kube-vip."
+      kubevip_image:
+        type: str
+        default: "ghcr.io/kube-vip/kube-vip:v0.8.7"
+        description:
+          - "Image kube-vip épinglée (à bumper vers la dernière stable)."
+      kubevip_extra_env:
+        type: dict
+        default: {}
+        description:
+          - "Variables d'environnement kube-vip supplémentaires (nom => valeur)."
+      kubevip_manifest_path:
+        type: str
+        default: "/var/lib/rancher/rke2/server/manifests/kube-vip.yaml"
+        description:
+          - "Chemin du manifest dans le dossier d'auto-deploy RKE2."

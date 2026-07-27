@@ -1,0 +1,23 @@
+---
+# roles/rke2_cilium/tasks/main.yml
+# Dépose le HelmChartConfig qui règle le CNI Cilium déployé par RKE2.
+# DOIT être posé AVANT le premier démarrage de rke2-server (c'est le CNI).
+# À jouer sur le primaire (ressource cluster-wide, appliquée une fois).
+
+- name: "cilium | Ensure RKE2 manifests directory exists"
+  ansible.builtin.file:
+    path: "{{ cilium_manifest_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: "cilium | Render HelmChartConfig (rke2-cilium)"
+  ansible.builtin.template:
+    src: rke2-cilium-config.yaml.j2
+    dest: "{{ cilium_manifest_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true

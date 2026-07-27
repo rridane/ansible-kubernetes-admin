@@ -1,0 +1,4 @@
+---
+# vars file for rke2_server
+# Discriminant des deux modes (bootstrap vs join). Expression seule => booléen natif.
+_rke2_is_primary: "{{ rke2_primary == inventory_hostname }}"

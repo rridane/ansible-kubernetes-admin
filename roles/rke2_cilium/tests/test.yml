@@ -1,0 +1,7 @@
+---
+- hosts: localhost
+  remote_user: root
+  vars:
+    cilium_manifest_path: "/tmp/rke2-cilium-config.yaml"
+  roles:
+    - roles/rke2_cilium

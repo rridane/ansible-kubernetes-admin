@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: rke2_server
+  author: rridane
+  description: >
+    Installe et configure un serveur RKE2. Deux modes selon rke2_primary :
+    BOOTSTRAP (amorce le cluster sur son IP) ou JOIN (rejoint via rke2_server_url,
+    token fourni par rke2_fetch_token). La configuration RKE2 est un dict
+    pass-through (rke2_config) rendu tel quel dans config.yaml.
+  license: MIT
+  min_ansible_version: "2.14"
+  galaxy_tags:
+    - rke2
+    - kubernetes
+    - bootstrap
+dependencies: []

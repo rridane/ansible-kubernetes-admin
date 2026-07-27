@@ -1,0 +1,17 @@
+---
+# rke2_agent defaults
+
+# Endpoint contacté pour rejoindre (ligne `server:`). Ex : "https://10.30.1.5:9345". Requis.
+rke2_server_url: ""
+# Token de jointure, fourni par le rôle rke2_fetch_token. Requis.
+rke2_join_token: ""
+
+# --- Installation -----------------------------------------------------------
+rke2_version: ""
+rke2_channel: stable
+rke2_install_url: "https://get.rke2.io"
+
+# --- Configuration RKE2 agent (pass-through 1:1 vers config.yaml) -----------
+# Dict libre : node-ip, node-label, node-taint... `server:`/`token:` sont gérés
+# par le rôle et ne doivent PAS figurer ici.
+rke2_config: {}

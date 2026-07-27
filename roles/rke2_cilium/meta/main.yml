@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: rke2_cilium
+  author: rridane
+  description: >
+    Dépose le HelmChartConfig rke2-cilium dans le dossier d'auto-deploy RKE2, AVANT
+    le démarrage du primaire (c'est le CNI). Règle Cilium en kube-proxy-free
+    (valuesContent en pass-through via cilium_values).
+  license: MIT
+  min_ansible_version: "2.14"
+  galaxy_tags:
+    - rke2
+    - kubernetes
+    - cilium
+    - cni
+dependencies: []

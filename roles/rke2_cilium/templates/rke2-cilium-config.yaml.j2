@@ -1,0 +1,11 @@
+# HelmChartConfig — généré par Ansible (rôle rke2_cilium) — NE PAS ÉDITER
+# Règle le CNI Cilium déployé par RKE2 (cni: cilium). Posé AVANT le start du primaire.
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: rke2-cilium
+  namespace: kube-system
+spec:
+  valuesContent: |-
+{{ cilium_values | to_nice_yaml | indent(4, true) }}

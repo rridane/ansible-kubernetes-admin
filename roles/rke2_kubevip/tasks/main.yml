@@ -1,0 +1,29 @@
+---
+# roles/rke2_kubevip/tasks/main.yml
+# Dépose le manifest kube-vip (DaemonSet + RBAC) dans le dossier d'auto-deploy RKE2.
+# RKE2 l'applique au démarrage → VIP de l'API en ARP L2 avec leader election
+# (un seul annonceur à la fois, coordination via un Lease Kubernetes).
+# À jouer sur le primaire : le DaemonSet couvre ensuite tous les control-plane.
+
+- name: "kube-vip | Fail if VIP is not set"
+  ansible.builtin.fail:
+    msg: "'kubevip_vip' doit être défini (adresse de la VIP de l'API)."
+  when: (kubevip_vip | default('') | trim) == ""
+
+- name: "kube-vip | Ensure RKE2 manifests directory exists"
+  ansible.builtin.file:
+    path: "{{ kubevip_manifest_path | dirname }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: "kube-vip | Render manifest (DaemonSet + RBAC)"
+  ansible.builtin.template:
+    src: kube-vip.yaml.j2
+    dest: "{{ kubevip_manifest_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true

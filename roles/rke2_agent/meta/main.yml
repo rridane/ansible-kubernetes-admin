@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  role_name: rke2_agent
+  author: rridane
+  description: >
+    Installe et configure un agent RKE2 (worker) : rejoint le cluster via
+    rke2_server_url avec le token fourni par rke2_fetch_token. Configuration en
+    dict pass-through (rke2_config) rendue telle quelle dans config.yaml.
+  license: MIT
+  min_ansible_version: "2.14"
+  galaxy_tags:
+    - rke2
+    - kubernetes
+    - agent
+    - worker
+dependencies: []

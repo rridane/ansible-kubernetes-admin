@@ -1,0 +1,17 @@
+---
+# rke2_kubevip defaults
+
+# Adresse de la VIP de l'API (ARP L2). Requis.
+kubevip_vip: ""
+
+# Interface réseau portant la VIP. Vide => auto-détection kube-vip.
+kubevip_interface: ""
+
+# Image kube-vip épinglée. Vérifie/bumpe la dernière stable sur ghcr.io/kube-vip.
+kubevip_image: "ghcr.io/kube-vip/kube-vip:v0.8.7"
+
+# Variables d'environnement kube-vip supplémentaires (pass-through, nom => valeur).
+kubevip_extra_env: {}
+
+# Manifest déposé dans le dossier d'auto-deploy RKE2 (server/manifests).
+kubevip_manifest_path: "/var/lib/rancher/rke2/server/manifests/kube-vip.yaml"

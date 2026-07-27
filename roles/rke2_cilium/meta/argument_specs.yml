@@ -1,0 +1,23 @@
+---
+argument_specs:
+  main:
+    short_description: "Dépose le HelmChartConfig rke2-cilium (kube-proxy-free) via server/manifests."
+    options:
+      cilium_values:
+        type: dict
+        default:
+          kubeProxyReplacement: true
+          k8sServiceHost: "127.0.0.1"
+          k8sServicePort: 6443
+          l2announcements:
+            enabled: true
+          k8sClientRateLimit:
+            qps: 10
+            burst: 20
+        description:
+          - "Valeurs Helm Cilium en pass-through (=> valuesContent). Socle RKE2 kube-proxy-free par défaut, surchargeable."
+      cilium_manifest_path:
+        type: str
+        default: "/var/lib/rancher/rke2/server/manifests/rke2-cilium-config.yaml"
+        description:
+          - "Chemin du HelmChartConfig dans le dossier d'auto-deploy RKE2."

@@ -1,0 +1,15 @@
+---
+argument_specs:
+  main:
+    short_description: "Récupère le token de cluster RKE2 sur le primaire (fact rke2_join_token)."
+    options:
+      rke2_primary:
+        type: str
+        required: true
+        description:
+          - "Nom d'inventaire du serveur d'amorçage sur lequel lire le token."
+      rke2_token_path:
+        type: str
+        default: "/var/lib/rancher/rke2/server/node-token"
+        description:
+          - "Chemin du token côté primaire (node-token, avec pinning de CA)."
