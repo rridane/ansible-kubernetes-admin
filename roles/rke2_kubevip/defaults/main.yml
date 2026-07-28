@@ -15,3 +15,8 @@ kubevip_extra_env: {}
 
 # Manifest déposé dans le dossier d'auto-deploy RKE2 (server/manifests).
 kubevip_manifest_path: "/var/lib/rancher/rke2/server/manifests/kube-vip.yaml"
+
+# Kubeconfig monté dans le pod kube-vip pour joindre l'apiserver LOCAL (127.0.0.1:6443)
+# au lieu de la ClusterIP -> indispensable sous Cilium kube-proxy-free (cf. template).
+# RKE2 y écrit un kubeconfig cluster-admin pointant sur https://127.0.0.1:6443.
+kubevip_kubeconfig_path: "/etc/rancher/rke2/rke2.yaml"

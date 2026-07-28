@@ -28,3 +28,9 @@ argument_specs:
         default: "/var/lib/rancher/rke2/server/manifests/kube-vip.yaml"
         description:
           - "Chemin du manifest dans le dossier d'auto-deploy RKE2."
+      kubevip_kubeconfig_path:
+        type: str
+        default: "/etc/rancher/rke2/rke2.yaml"
+        description:
+          - "Kubeconfig hôte monté dans kube-vip pour joindre l'apiserver local (127.0.0.1:6443)."
+          - "Requis sous Cilium kube-proxy-free (la ClusterIP n'est pas joignable en hostNetwork)."

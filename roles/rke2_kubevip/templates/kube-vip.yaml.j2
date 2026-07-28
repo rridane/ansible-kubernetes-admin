@@ -103,8 +103,27 @@ spec:
           securityContext:
             capabilities:
               add: ["NET_ADMIN", "NET_RAW"]
+          # kube-proxy-free (Cilium KPR) : kube-vip est hostNetwork -> la ClusterIP
+          # kubernetes (10.43.0.1) n'est PAS traduite de façon fiable pour le host
+          # netns, donc l'API par ClusterIP est injoignable et le lease jamais acquis.
+          # On monte le kubeconfig RKE2 (server: https://127.0.0.1:6443) -> kube-vip
+          # tape l'apiserver LOCAL. Réf terrain : kube-vip#721 / #684 (RKE2 HA + Cilium).
+          volumeMounts:
+            - name: kubeconfig
+              mountPath: /etc/kubernetes/admin.conf
+              readOnly: true
       hostNetwork: true
       serviceAccountName: kube-vip
+      # Complément du montage ci-dessus : "kubernetes" -> apiserver local.
+      hostAliases:
+        - ip: 127.0.0.1
+          hostnames:
+            - kubernetes
+      volumes:
+        - name: kubeconfig
+          hostPath:
+            path: "{{ kubevip_kubeconfig_path }}"
+            type: File
       tolerations:
         - effect: NoSchedule
           operator: Exists
