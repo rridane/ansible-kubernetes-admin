@@ -15,3 +15,26 @@ cilium_values:
 
 # Manifest déposé dans le dossier d'auto-deploy RKE2 (AVANT le start du primaire).
 cilium_manifest_path: "/var/lib/rancher/rke2/server/manifests/rke2-cilium-config.yaml"
+
+# ---------------------------------------------------------------------------
+# LB de Services eBPF (annonce L2) — CR posés dans server/manifests/.
+# RKE2 les auto-applique et RETENTE jusqu'à ce que les CRD Cilium existent
+# (auto-ordonnancement : pas de kubectl post-bootstrap).
+# ---------------------------------------------------------------------------
+
+# Plage(s) d'IP allouables aux Services type LoadBalancer (CiliumLoadBalancerIPPool).
+# Vide => AUCUN pool (pas de Service LoadBalancer). Chaque entrée :
+#   { name: <str>, blocks: [ {start, stop} | {cidr} ], serviceSelector: {matchLabels}? }
+cilium_lb_pools: []
+
+# Pose une CiliumL2AnnouncementPolicy (loadBalancerIPs: true) — le "ON" de l'ARP.
+cilium_l2_announce: false
+cilium_l2_interfaces: []          # regex golang des interfaces ; vide => toutes (auto-sélection)
+cilium_l2_node_selector: {}       # matchLabels des nœuds éligibles ; vide => tous
+
+# apiVersions des CR — ⚠️ à confirmer selon la version Cilium (kubectl get crd)
+cilium_lb_pool_api_version: "cilium.io/v2"
+cilium_l2_policy_api_version: "cilium.io/v2alpha1"
+
+cilium_lb_pool_manifest_path: "/var/lib/rancher/rke2/server/manifests/cilium-lb-pool.yaml"
+cilium_l2_policy_manifest_path: "/var/lib/rancher/rke2/server/manifests/cilium-l2-policy.yaml"

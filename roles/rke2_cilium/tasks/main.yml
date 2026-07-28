@@ -1,8 +1,9 @@
 ---
 # roles/rke2_cilium/tasks/main.yml
-# Dépose le HelmChartConfig qui règle le CNI Cilium déployé par RKE2.
+# Dépose le HelmChartConfig qui règle le CNI Cilium déployé par RKE2, + (option)
+# les CR du LB de Services eBPF (pool d'IP + policy d'annonce L2).
 # DOIT être posé AVANT le premier démarrage de rke2-server (c'est le CNI).
-# À jouer sur le primaire (ressource cluster-wide, appliquée une fois).
+# À jouer sur le primaire (ressources cluster-wide, appliquées une fois).
 
 - name: "cilium | Ensure RKE2 manifests directory exists"
   ansible.builtin.file:
@@ -21,3 +22,24 @@
     group: root
     mode: "0644"
   become: true
+
+# --- LB de Services eBPF : pool d'IP + annonce L2 (auto-apply + retry par RKE2) ---
+- name: "cilium | Render CiliumLoadBalancerIPPool"
+  ansible.builtin.template:
+    src: cilium-lb-pool.yaml.j2
+    dest: "{{ cilium_lb_pool_manifest_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: cilium_lb_pools | length > 0
+
+- name: "cilium | Render CiliumL2AnnouncementPolicy"
+  ansible.builtin.template:
+    src: cilium-l2-policy.yaml.j2
+    dest: "{{ cilium_l2_policy_manifest_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: cilium_l2_announce | bool

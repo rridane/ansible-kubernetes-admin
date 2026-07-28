@@ -1,0 +1,18 @@
+# CiliumL2AnnouncementPolicy — généré par Ansible (rôle rke2_cilium) — NE PAS ÉDITER
+# Le "ON" de l'annonce ARP : sans cette policy, les IP LB sont assignées mais
+# jamais annoncées sur le L2. interfaces omis => toutes (les IP vRack s'auto-sélectionnent).
+---
+apiVersion: {{ cilium_l2_policy_api_version }}
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: l2-announce
+spec:
+  loadBalancerIPs: true
+{% if cilium_l2_interfaces | length > 0 %}
+  interfaces:
+{% for i in cilium_l2_interfaces %}
+    - {{ i | to_json }}
+{% endfor %}
+{% endif %}
+  nodeSelector:
+    matchLabels: {{ cilium_l2_node_selector | to_json }}

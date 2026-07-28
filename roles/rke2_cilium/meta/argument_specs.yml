@@ -1,7 +1,7 @@
 ---
 argument_specs:
   main:
-    short_description: "Dépose le HelmChartConfig rke2-cilium (kube-proxy-free) via server/manifests."
+    short_description: "Dépose le HelmChartConfig rke2-cilium (kube-proxy-free) + (option) le LB de Services eBPF (pool + annonce L2), via server/manifests."
     options:
       cilium_values:
         type: dict
@@ -21,3 +21,45 @@ argument_specs:
         default: "/var/lib/rancher/rke2/server/manifests/rke2-cilium-config.yaml"
         description:
           - "Chemin du HelmChartConfig dans le dossier d'auto-deploy RKE2."
+      cilium_lb_pools:
+        type: list
+        elements: dict
+        default: []
+        description:
+          - "Plages d'IP pour les Services LoadBalancer (CiliumLoadBalancerIPPool). Vide => pas de pool. Entrée : {name, blocks: [{start,stop}|{cidr}], serviceSelector?}."
+      cilium_l2_announce:
+        type: bool
+        default: false
+        description:
+          - "Pose une CiliumL2AnnouncementPolicy (loadBalancerIPs: true) — sans elle, les IP LB ne sont jamais annoncées en ARP."
+      cilium_l2_interfaces:
+        type: list
+        elements: str
+        default: []
+        description:
+          - "Regex golang des interfaces d'annonce L2. Vide => toutes (les IP vRack s'auto-sélectionnent)."
+      cilium_l2_node_selector:
+        type: dict
+        default: {}
+        description:
+          - "matchLabels des nœuds éligibles à l'annonce L2. Vide => tous."
+      cilium_lb_pool_api_version:
+        type: str
+        default: "cilium.io/v2"
+        description:
+          - "apiVersion du CiliumLoadBalancerIPPool (à confirmer selon la version Cilium)."
+      cilium_l2_policy_api_version:
+        type: str
+        default: "cilium.io/v2alpha1"
+        description:
+          - "apiVersion du CiliumL2AnnouncementPolicy (à confirmer selon la version Cilium)."
+      cilium_lb_pool_manifest_path:
+        type: str
+        default: "/var/lib/rancher/rke2/server/manifests/cilium-lb-pool.yaml"
+        description:
+          - "Chemin du CiliumLoadBalancerIPPool dans server/manifests/."
+      cilium_l2_policy_manifest_path:
+        type: str
+        default: "/var/lib/rancher/rke2/server/manifests/cilium-l2-policy.yaml"
+        description:
+          - "Chemin du CiliumL2AnnouncementPolicy dans server/manifests/."

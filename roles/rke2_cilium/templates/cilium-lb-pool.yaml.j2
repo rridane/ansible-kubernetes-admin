@@ -1,0 +1,19 @@
+# CiliumLoadBalancerIPPool — généré par Ansible (rôle rke2_cilium) — NE PAS ÉDITER
+# Plage(s) d'IP allouées aux Services type LoadBalancer. L'IP précise se choisit
+# côté Service via l'annotation lbipam.cilium.io/ips.
+{% for pool in cilium_lb_pools %}
+---
+apiVersion: {{ cilium_lb_pool_api_version }}
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: {{ pool.name | default('lb-pool-' ~ loop.index) }}
+spec:
+{% if pool.serviceSelector is defined %}
+  serviceSelector:
+    matchLabels: {{ pool.serviceSelector.matchLabels | default({}) | to_json }}
+{% endif %}
+  blocks:
+{% for b in pool.blocks %}
+    - {{ b | to_json }}
+{% endfor %}
+{% endfor %}
