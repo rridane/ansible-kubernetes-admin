@@ -1,3 +1,6 @@
 
 # IDE
 .idea/
+
+# artefacts de build de la collection
+*.tar.gz
