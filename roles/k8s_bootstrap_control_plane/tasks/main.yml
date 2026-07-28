@@ -92,3 +92,26 @@
   when:
     - k8s_copy_kubeconfig_for_user_enabled
     - (k8s_copy_kubeconfig_for_user.owner | length) > 0
+
+- block:
+    - name: "Wait for any CNI config file to appear (generic)"
+      ansible.builtin.shell: |
+        timeout 180 bash -c 'until ls /etc/cni/net.d/*.conf* >/dev/null 2>&1; do sleep 3; done'
+      args:
+        executable: /bin/bash
+      register: cni_conf_check
+      changed_when: false
+      failed_when: cni_conf_check.rc != 0
+      become: yes
+
+    - name: "Restart containerd to reload CNI configuration"
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted
+        enabled: true
+      become: yes
+
+  when:
+    - k8s_is_primary_cp
+    - not k8s_admin_conf.stat.exists
+
