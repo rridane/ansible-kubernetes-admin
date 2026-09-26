@@ -1,0 +1,88 @@
+---
+argument_specs:
+  main:
+    short_description: "kubeadm upgrade apply (primaire) / upgrade node (autres control-planes), avec garde-fous et sauvegardes."
+    options:
+      k8s_upgrade_version:
+        type: str
+        required: true
+        description:
+          - "Version Kubernetes cible, x.y.z (ex : 1.28.15)."
+      k8s_upgrade_mode:
+        type: str
+        default: apply
+        choices: [prepare, apply]
+        description:
+          - "prepare : garde-fous, pré-pull des images et `kubeadm upgrade plan`, sans rien modifier au control plane. apply : déroulé complet."
+      k8s_primary_cp_host:
+        type: str
+        required: true
+        description:
+          - "Nom d'inventaire du control-plane qui joue `kubeadm upgrade apply`."
+      k8s_upgrade_node_name:
+        type: str
+        default: "{{ ansible_hostname | lower }}"
+        description:
+          - "Nom du nœud Kubernetes de cet hôte (suffixe des static pods)."
+      k8s_upgrade_kubeconfig:
+        type: str
+        default: "/etc/kubernetes/admin.conf"
+        description:
+          - "Kubeconfig admin présent sur les control-planes."
+      k8s_upgrade_manifests_dir:
+        type: str
+        default: "/etc/kubernetes/manifests"
+        description:
+          - "Répertoire des static pods."
+      k8s_upgrade_etcd_pki_dir:
+        type: str
+        default: "/etc/kubernetes/pki/etcd"
+        description:
+          - "PKI etcd (ca.crt, healthcheck-client.crt/.key), montée au même chemin dans le pod etcd."
+      k8s_upgrade_backup_dir:
+        type: str
+        default: "/root/k8s-upgrade-backups"
+        description:
+          - "Racine des sauvegardes (<backup_dir>/v<version>/)."
+      k8s_upgrade_backup_config:
+        type: bool
+        default: true
+        description:
+          - "Copie /etc/kubernetes avant l'upgrade."
+      k8s_upgrade_etcd_snapshot:
+        type: bool
+        default: true
+        description:
+          - "Snapshot etcd sur le primaire avant apply."
+      k8s_upgrade_prepull_images:
+        type: bool
+        default: true
+        description:
+          - "kubeadm config images pull avant l'upgrade."
+      k8s_upgrade_show_plan:
+        type: bool
+        default: true
+        description:
+          - "Affiche la sortie de kubeadm upgrade plan."
+      k8s_upgrade_apply_extra_args:
+        type: list
+        elements: str
+        default: []
+        description:
+          - "Arguments additionnels de kubeadm upgrade apply."
+      k8s_upgrade_node_extra_args:
+        type: list
+        elements: str
+        default: []
+        description:
+          - "Arguments additionnels de kubeadm upgrade node."
+      k8s_upgrade_health_retries:
+        type: int
+        default: 60
+        description:
+          - "Nombre d'essais des contrôles de santé post-upgrade."
+      k8s_upgrade_health_delay:
+        type: int
+        default: 5
+        description:
+          - "Délai (s) entre deux essais."

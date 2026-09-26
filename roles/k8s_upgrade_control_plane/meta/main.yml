@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: k8s_upgrade_control_plane
+  author: rridane
+  description: >
+    Monte un control-plane kubeadm d'une mineure : garde-fous (skew, santé etcd, nœuds
+    Ready), sauvegarde de /etc/kubernetes, snapshot etcd, puis `kubeadm upgrade apply`
+    sur le primaire ou `kubeadm upgrade node` sur les autres, et contrôles de santé.
+  license: MIT
+  min_ansible_version: "2.14"
+  galaxy_tags:
+    - kubernetes
+    - kubeadm
+    - upgrade
+dependencies: []

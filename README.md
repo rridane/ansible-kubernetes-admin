@@ -44,6 +44,36 @@ Allows joining a node as a **worker** in the cluster.
 
 ---
 
+### 🔹 `k8s_upgrade_packages`
+Moves `kubeadm` / `kubelet` / `kubectl` to an **exact target version**.
+- Checks the repository key (present, not expired — it is installed once, by hand; see the
+  role README), then points the pkgs.k8s.io repository at the target minor series.
+- Installs the requested packages at `x.y.z-rev` (downgrade allowed), then holds them.
+  Creates no other file than `kubernetes.list`, rewritten in place.
+
+👉 [See the role documentation](roles/k8s_upgrade_packages/README.md)
+
+---
+
+### 🔹 `k8s_upgrade_control_plane`
+Upgrades **one control-plane** by one minor (run `serial: 1`, primary first).
+- Guards: control-planes Ready, one minor at a time, previous hop finished, etcd healthy.
+- Backs up `/etc/kubernetes` and takes an etcd snapshot (primary).
+- `kubeadm upgrade apply` on the primary, `kubeadm upgrade node` on the others, then health checks.
+
+👉 [See the role documentation](roles/k8s_upgrade_control_plane/README.md)
+
+---
+
+### 🔹 `k8s_upgrade_node`
+Upgrades the **kubelet of one node** once the whole control plane is at the target.
+- Drain → packages → `kubeadm upgrade node` (workers) → `--container-runtime` / `sandbox_image` fixes
+  → kubelet restart → wait Ready → uncordon.
+
+👉 [See the role documentation](roles/k8s_upgrade_node/README.md)
+
+---
+
 ## 🚀 Usage Example
 
 Here is a typical workflow using the collection:
@@ -72,6 +102,37 @@ Here is a typical workflow using the collection:
   become: yes
   roles:
     - role: rridane.kubernetes_admin.k8s_manage_worker_nodes
+```
+
+Upgrading by one minor (kubeadm procedure, repeat per minor):
+
+```yaml
+- name: Control plane — primary (kubeadm upgrade apply)
+  hosts: masters[0]
+  become: yes
+  vars: { k8s_upgrade_version: "1.28.15", k8s_primary_cp_host: "{{ groups['masters'][0] }}" }
+  roles:
+    - role: rridane.kubernetes_admin.k8s_upgrade_packages
+      vars: { k8s_upgrade_packages: [kubeadm] }
+    - role: rridane.kubernetes_admin.k8s_upgrade_control_plane
+
+- name: Control plane — others (kubeadm upgrade node)
+  hosts: masters[1:]
+  become: yes
+  serial: 1
+  vars: { k8s_upgrade_version: "1.28.15", k8s_primary_cp_host: "{{ groups['masters'][0] }}" }
+  roles:
+    - role: rridane.kubernetes_admin.k8s_upgrade_packages
+      vars: { k8s_upgrade_packages: [kubeadm] }
+    - role: rridane.kubernetes_admin.k8s_upgrade_control_plane
+
+- name: Kubelets, one node at a time
+  hosts: masters:workers
+  become: yes
+  serial: 1
+  vars: { k8s_upgrade_version: "1.28.15", k8s_primary_cp_host: "{{ groups['masters'][0] }}" }
+  roles:
+    - role: rridane.kubernetes_admin.k8s_upgrade_node
 ```
 
 ## Compatibility

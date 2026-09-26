@@ -1,0 +1,123 @@
+---
+argument_specs:
+  main:
+    short_description: "Monte le kubelet d'un nœud kubeadm (drain → paquets → restart → uncordon)."
+    options:
+      k8s_upgrade_version:
+        type: str
+        required: true
+        description:
+          - "Version Kubernetes cible, x.y.z (ex : 1.28.15)."
+      k8s_primary_cp_host:
+        type: str
+        required: true
+        description:
+          - "Control-plane sur lequel sont délégués les kubectl (drain, uncordon, contrôles)."
+      k8s_upgrade_node_name:
+        type: str
+        default: "{{ ansible_hostname | lower }}"
+        description:
+          - "Nom du nœud Kubernetes de cet hôte."
+      k8s_upgrade_kubeconfig:
+        type: str
+        default: "/etc/kubernetes/admin.conf"
+        description:
+          - "Kubeconfig admin sur k8s_primary_cp_host."
+      k8s_upgrade_manifests_dir:
+        type: str
+        default: "/etc/kubernetes/manifests"
+        description:
+          - "Répertoire des static pods (détecte un control-plane)."
+      k8s_upgrade_node_packages:
+        type: list
+        elements: str
+        default: [kubeadm, kubelet, kubectl]
+        description:
+          - "Paquets montés sur le nœud drainé."
+      k8s_upgrade_drain:
+        type: bool
+        default: true
+        description:
+          - "Draine le nœud avant de toucher au kubelet."
+      k8s_upgrade_drain_args:
+        type: list
+        elements: str
+        default: [--ignore-daemonsets, --delete-emptydir-data]
+        description:
+          - "Arguments de kubectl drain (le --timeout est géré par k8s_upgrade_drain_attempt_timeout)."
+      k8s_upgrade_drain_attempt_timeout:
+        type: str
+        default: "120s"
+        description:
+          - "Durée d'une tentative de drain (--timeout de kubectl drain)."
+      k8s_upgrade_drain_max_attempts:
+        type: int
+        default: 5
+        description:
+          - "Nombre de tentatives de drain avant échec."
+      k8s_upgrade_interactive:
+        type: bool
+        default: true
+        description:
+          - "Drain bloqué / kubelet absent : diagnostic puis pause opérateur sans limite. false : tentatives automatiques puis échec."
+      k8s_upgrade_drain_extra_args:
+        type: list
+        elements: str
+        default: []
+        description:
+          - "Arguments additionnels (ex : --force pour les pods sans contrôleur)."
+      k8s_upgrade_uncordon:
+        type: bool
+        default: true
+        description:
+          - "Remet le nœud en service (seulement s'il l'était avant)."
+      k8s_upgrade_cordon_annotation:
+        type: str
+        default: "k8s-upgrade/cordoned"
+        description:
+          - "Annotation posée quand le rôle cordonne le nœud (retirée à l'uncordon) : distingue un upgrade interrompu d'un cordon posé par un tiers."
+      k8s_upgrade_allow_kubelet_skip:
+        type: bool
+        default: false
+        description:
+          - "Autorise un saut de plus d'une mineure du kubelet."
+      k8s_upgrade_sandbox_image_fix:
+        type: bool
+        default: true
+        description:
+          - "Aligne sandbox_image de containerd sur la pause attendue par kubeadm."
+      k8s_upgrade_containerd_config:
+        type: str
+        default: "/etc/containerd/config.toml"
+        description:
+          - "Configuration containerd."
+      k8s_upgrade_containerd_socket:
+        type: str
+        default: "unix:///run/containerd/containerd.sock"
+        description:
+          - "Socket CRI utilisé par crictl."
+      k8s_upgrade_remove_container_runtime_flag:
+        type: bool
+        default: true
+        description:
+          - "Retire --container-runtime=remote de kubeadm-flags.env (cible >= 1.27)."
+      k8s_upgrade_kubeadm_flags_env:
+        type: str
+        default: "/var/lib/kubelet/kubeadm-flags.env"
+        description:
+          - "Fichier d'arguments kubelet écrit par kubeadm."
+      k8s_upgrade_ready_retries:
+        type: int
+        default: 60
+        description:
+          - "Nombre d'essais de l'attente Ready."
+      k8s_upgrade_ready_delay:
+        type: int
+        default: 5
+        description:
+          - "Délai (s) entre deux essais."
+      k8s_upgrade_ready_max_attempts:
+        type: int
+        default: 3
+        description:
+          - "Nombre d'attentes (de retries × delay) avant échec."

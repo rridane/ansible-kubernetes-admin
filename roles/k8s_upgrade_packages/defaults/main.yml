@@ -1,0 +1,30 @@
+---
+# k8s_upgrade_packages defaults
+
+# Version Kubernetes cible, SANS préfixe "v" (ex : "1.28.15"). Requis.
+# La série du dépôt pkgs.k8s.io (v1.28) en est dérivée.
+k8s_upgrade_version: ""
+
+# Révision du paquet pkgs.k8s.io : kubeadm=1.28.15-1.1
+k8s_upgrade_package_revision: "1.1"
+
+# Paquets à amener à la version cible. Le control plane ne monte QUE kubeadm
+# (kubelet/kubectl suivent nœud par nœud, drainé) : c'est l'appelant qui choisit.
+k8s_upgrade_packages:
+  - kubeadm
+
+k8s_upgrade_apt_base_url: "https://pkgs.k8s.io/core:/stable"
+# Keyring référencé par signed-by. Le rôle ne le pose PAS : il vérifie qu'il existe et n'est
+# pas expiré (pose unique, à la main : voir le README, « Pose de la clé »).
+k8s_upgrade_apt_keyring: "/etc/apt/keyrings/kubernetes-apt-keyring.gpg"
+k8s_upgrade_apt_list: "/etc/apt/sources.list.d/kubernetes.list"
+
+# Autorise la redescente (ex : kubeadm monté trop haut par un `apt upgrade` hors procédure).
+k8s_upgrade_allow_downgrade: true
+
+# apt-mark hold après installation (sinon un apt upgrade monte la série en douce).
+k8s_upgrade_hold: true
+
+# Environnement des tâches réseau (proxy). Vide => celui de la session (pam_env).
+# ex : { http_proxy: "http://proxy.example.com:8080", https_proxy: "http://proxy.example.com:8080" }
+k8s_upgrade_environment: {}

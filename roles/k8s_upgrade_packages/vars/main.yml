@@ -1,0 +1,5 @@
+---
+# vars file for k8s_upgrade_packages
+_k8s_upgrade_semver: "{{ k8s_upgrade_version | regex_replace('^v', '') }}"
+_k8s_upgrade_series: "v{{ _k8s_upgrade_semver.split('.')[:2] | join('.') }}"
+_k8s_upgrade_deb_version: "{{ _k8s_upgrade_semver }}-{{ k8s_upgrade_package_revision }}"

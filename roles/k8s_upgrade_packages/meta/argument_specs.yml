@@ -1,0 +1,51 @@
+---
+argument_specs:
+  main:
+    short_description: "Vérifie la clé, bascule le dépôt pkgs.k8s.io sur la série cible et installe/fige les paquets kube à la version exacte."
+    options:
+      k8s_upgrade_version:
+        type: str
+        required: true
+        description:
+          - "Version Kubernetes cible, x.y.z (ex : 1.28.15). Un préfixe v est toléré."
+      k8s_upgrade_package_revision:
+        type: str
+        default: "1.1"
+        description:
+          - "Révision pkgs.k8s.io du paquet (kubeadm=1.28.15-1.1)."
+      k8s_upgrade_packages:
+        type: list
+        elements: str
+        default: [kubeadm]
+        description:
+          - "Paquets à amener à la version cible (kubeadm, kubelet, kubectl)."
+      k8s_upgrade_apt_base_url:
+        type: str
+        default: "https://pkgs.k8s.io/core:/stable"
+        description:
+          - "Base des dépôts pkgs.k8s.io."
+      k8s_upgrade_apt_keyring:
+        type: str
+        default: "/etc/apt/keyrings/kubernetes-apt-keyring.gpg"
+        description:
+          - "Keyring référencé par signed-by. Vérifié (présent, non expiré), jamais posé par le rôle."
+      k8s_upgrade_apt_list:
+        type: str
+        default: "/etc/apt/sources.list.d/kubernetes.list"
+        description:
+          - "Fichier de source apt réécrit par le rôle."
+      k8s_upgrade_allow_downgrade:
+        type: bool
+        default: true
+        description:
+          - "Autorise la redescente d'un paquet (kubeadm installé trop haut par apt)."
+      k8s_upgrade_hold:
+        type: bool
+        default: true
+        description:
+          - "Fige les paquets après installation (apt-mark hold)."
+      k8s_upgrade_environment:
+        type: dict
+        default: {}
+        description:
+          - "Variables d'environnement des tâches réseau (proxy)."

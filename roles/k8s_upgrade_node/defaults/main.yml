@@ -1,0 +1,66 @@
+---
+# k8s_upgrade_node defaults
+
+# Version Kubernetes cible, x.y.z (ex : "1.28.15"). Requis.
+k8s_upgrade_version: ""
+
+# Control-plane sur lequel les kubectl sont délégués (drain, uncordon, contrôles). Requis.
+k8s_primary_cp_host: ""
+
+# Nom du nœud Kubernetes de cet hôte.
+k8s_upgrade_node_name: "{{ ansible_hostname | lower }}"
+
+# Kubeconfig admin, SUR k8s_primary_cp_host.
+k8s_upgrade_kubeconfig: "/etc/kubernetes/admin.conf"
+k8s_upgrade_manifests_dir: "/etc/kubernetes/manifests"
+
+# Paquets montés sur le nœud drainé (kubeadm sert au `kubeadm upgrade node` des workers).
+k8s_upgrade_node_packages:
+  - kubeadm
+  - kubelet
+  - kubectl
+
+# --- Interaction ------------------------------------------------------------------
+# Drain bloqué ou kubelet qui ne revient pas : diagnostic puis PAUSE sans limite de temps
+# ([Entrée] = nouvelle tentative, abort = arrêt). false (CI) : nouvelles tentatives
+# automatiques, puis échec.
+k8s_upgrade_interactive: true
+
+# --- Drain --------------------------------------------------------------------
+k8s_upgrade_drain: true
+k8s_upgrade_drain_args:
+  - --ignore-daemonsets
+  - --delete-emptydir-data
+# Durée d'UNE tentative (--timeout de kubectl drain) et nombre de tentatives.
+# Non interactif : attente max = timeout × tentatives (défaut 10 min).
+k8s_upgrade_drain_attempt_timeout: 120s
+k8s_upgrade_drain_max_attempts: 5
+# ex : ["--force"] pour les pods sans contrôleur (pods nus, jobs CI : ils seront tués)
+k8s_upgrade_drain_extra_args: []
+# Ne remet en service que les nœuds qui l'étaient avant le drain.
+k8s_upgrade_uncordon: true
+# Annotation posée quand le rôle cordonne le nœud, retirée à l'uncordon : à la relance après
+# un arrêt, le rôle sait que ce cordon est le sien et remet le nœud en service.
+k8s_upgrade_cordon_annotation: "k8s-upgrade/cordoned"
+
+# --- Garde-fous ---------------------------------------------------------------
+# Le kubelet peut avoir 3 mineures de retard, mais on le monte d'une mineure à la fois.
+k8s_upgrade_allow_kubelet_skip: false
+
+# --- Ajustements de la procédure ----------------------------------------------
+# Aligne sandbox_image (containerd) sur l'image pause attendue par kubeadm
+# (sinon warning « sandbox image … inconsistent » à chaque kubeadm).
+k8s_upgrade_sandbox_image_fix: true
+k8s_upgrade_containerd_config: "/etc/containerd/config.toml"
+k8s_upgrade_containerd_socket: "unix:///run/containerd/containerd.sock"
+
+# Retire --container-runtime=remote de kubeadm-flags.env (flag supprimé en 1.27 :
+# le kubelet ne redémarrerait pas).
+k8s_upgrade_remove_container_runtime_flag: true
+k8s_upgrade_kubeadm_flags_env: "/var/lib/kubelet/kubeadm-flags.env"
+
+# Attente du nœud Ready à la cible après restart du kubelet : une attente =
+# retries × delay (défaut 5 min), répétée jusqu'à ready_max_attempts fois.
+k8s_upgrade_ready_retries: 60
+k8s_upgrade_ready_delay: 5
+k8s_upgrade_ready_max_attempts: 3

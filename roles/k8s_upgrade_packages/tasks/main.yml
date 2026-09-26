@@ -1,0 +1,166 @@
+---
+# roles/k8s_upgrade_packages/tasks/main.yml
+# Amène les paquets kube d'un nœud à la version cible : vérifie la clé du dépôt (posée à la
+# main, une fois), bascule le dépôt pkgs.k8s.io sur la série cible (un dépôt par mineure),
+# installe les paquets demandés à la version exacte, puis les fige (hold).
+# Ne crée aucun autre fichier que kubernetes.list, réécrit en place.
+
+- name: "Validate | Target version is x.y.z"
+  ansible.builtin.assert:
+    that:
+      - _k8s_upgrade_semver is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - k8s_upgrade_packages | length > 0
+    fail_msg: "k8s_upgrade_version doit valoir x.y.z (ex : 1.28.15), reçu '{{ k8s_upgrade_version }}'."
+    quiet: true
+
+# --- Anciennes sources ------------------------------------------------------
+# apt.kubernetes.io a été supprimé en mars 2024 : une ligne restante casse apt-get update.
+
+- name: "Repo | Look for legacy Kubernetes apt sources"
+  ansible.builtin.shell: >-
+    grep -rlE 'apt\.kubernetes\.io|packages\.cloud\.google\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ || true
+  register: _k8s_legacy_sources
+  changed_when: false
+  check_mode: false
+
+- name: "Repo | Fail on legacy sources outside {{ k8s_upgrade_apt_list }}"
+  ansible.builtin.fail:
+    msg: >-
+      Sources apt.kubernetes.io (dépôt supprimé) trouvées dans : {{ _k8s_legacy_foreign | join(', ') }}.
+      Les retirer à la main : ce rôle ne réécrit que {{ k8s_upgrade_apt_list }}.
+  vars:
+    _k8s_legacy_foreign: "{{ _k8s_legacy_sources.stdout_lines | reject('equalto', k8s_upgrade_apt_list) | list }}"
+  when: _k8s_legacy_foreign | length > 0
+
+# --- Clé du dépôt (vérifiée, jamais téléchargée) ------------------------------
+# La clé est la même pour toutes les séries : on la pose UNE fois par cluster, à la main
+# (README, « Pose de la clé »). Ici on vérifie seulement qu'elle est là et valide, AVANT de
+# toucher au dépôt : une clé absente ou expirée (EXPKEYSIG) arrête le rôle, rien n'est modifié.
+- name: "Key | Read {{ k8s_upgrade_apt_keyring }}"
+  ansible.builtin.command:
+    cmd: "gpg --show-keys --with-colons {{ k8s_upgrade_apt_keyring }}"
+  register: _k8s_key_info
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+# Champ 7 de la ligne "pub" = expiration (epoch), vide si la clé n'expire pas.
+- name: "Key | Fail if the key is missing or expired"
+  ansible.builtin.assert:
+    that:
+      - _k8s_key_info.rc == 0
+      - _k8s_key_pub | length > 0
+      - _k8s_key_expiry | length == 0 or (_k8s_key_expiry | int) > (ansible_date_time.epoch | int)
+    fail_msg: >-
+      {{ (_k8s_key_info.rc != 0 or _k8s_key_pub | length == 0) | ternary('Clé du dépôt absente ou illisible',
+      'Clé du dépôt expirée le ' ~ ('%Y-%m-%d' | strftime(_k8s_key_expiry | int if _k8s_key_expiry | length > 0 else 0))) }}
+      ({{ k8s_upgrade_apt_keyring }}) : apt refuserait le dépôt. Rien n'a été modifié. À poser une fois, sur ce nœud :
+      curl -fsSL {{ k8s_upgrade_apt_base_url }}:/<SÉRIE>/deb/Release.key | gpg --dearmor --yes -o {{ k8s_upgrade_apt_keyring }}
+      — <SÉRIE> = une série MAINTENUE (ex. la plus récente) : les séries EOL publient une copie périmée
+      de la même clé. Contrôle : gpg --show-keys {{ k8s_upgrade_apt_keyring }}.
+    quiet: true
+  vars:
+    _k8s_key_pub: "{{ _k8s_key_info.stdout_lines | default([]) | select('match', '^pub:') | first | default('') }}"
+    _k8s_key_expiry: "{{ (_k8s_key_pub.split(':') + ['', '', '', '', '', '', ''])[6] }}"
+
+- name: "Key | Days left before expiry"
+  ansible.builtin.debug:
+    msg: >-
+      Clé {{ k8s_upgrade_apt_keyring }} valide jusqu'au {{ '%Y-%m-%d' | strftime(_k8s_key_expiry | int) }}
+      ({{ (((_k8s_key_expiry | int) - (ansible_date_time.epoch | int)) / 86400) | int }} jours).
+  vars:
+    _k8s_key_pub: "{{ _k8s_key_info.stdout_lines | select('match', '^pub:') | first }}"
+    _k8s_key_expiry: "{{ (_k8s_key_pub.split(':') + ['', '', '', '', '', '', ''])[6] }}"
+  when: _k8s_key_expiry | length > 0
+
+# Restes d'anciennes installations : signalés, jamais supprimés (le rôle ne les a pas créés).
+- name: "Key | Look for leftover Kubernetes keyrings"
+  ansible.builtin.find:
+    paths:
+      - "{{ k8s_upgrade_apt_keyring | dirname }}"
+      - /usr/share/keyrings
+      - /etc/apt/trusted.gpg.d
+    patterns:
+      - "kubernetes*"
+      - "*k8s*"
+    excludes:
+      - "{{ k8s_upgrade_apt_keyring | basename }}"
+  register: _k8s_leftover_keyrings
+
+- name: "Key | Warn about leftovers (cleanup is manual)"
+  ansible.builtin.debug:
+    msg: >-
+      Restes probables d'une ancienne installation (non utilisés par {{ k8s_upgrade_apt_list }}) :
+      {{ _k8s_leftover_keyrings.files | map(attribute='path') | join(', ') }}.
+      À supprimer à la main après vérification (grep -r <fichier> /etc/apt).
+  when: _k8s_leftover_keyrings.files | length > 0
+
+# --- Dépôt ------------------------------------------------------------------
+
+- name: "Repo | Point {{ k8s_upgrade_apt_list }} at {{ _k8s_upgrade_series }}"
+  ansible.builtin.copy:
+    dest: "{{ k8s_upgrade_apt_list }}"
+    content: "deb [signed-by={{ k8s_upgrade_apt_keyring }}] {{ k8s_upgrade_apt_base_url }}:/{{ _k8s_upgrade_series }}/deb/ /\n"
+    owner: root
+    group: root
+    mode: "0644"
+  register: _k8s_repo
+
+- name: "Repo | apt-get update"
+  ansible.builtin.apt:
+    update_cache: true
+  environment: "{{ k8s_upgrade_environment }}"
+
+- name: "Repo | Check {{ _k8s_upgrade_deb_version }} is available"
+  ansible.builtin.command:
+    cmd: apt-cache madison kubeadm
+  register: _k8s_madison
+  changed_when: false
+  check_mode: false
+  # En plan (--check) le dépôt n'a pas encore basculé : la vérif n'a de sens qu'en apply.
+  when: not (ansible_check_mode and _k8s_repo.changed)
+  failed_when: _k8s_upgrade_deb_version not in _k8s_madison.stdout
+
+# --- Paquets ----------------------------------------------------------------
+
+# En plan (--check), si le dépôt doit changer de série, apt ne connaît pas encore la version
+# cible : on annonce l'installation au lieu de la simuler (elle échouerait à tort).
+- name: "Packages | Would install {{ k8s_upgrade_packages | join(', ') }} = {{ _k8s_upgrade_deb_version }} (plan)"
+  ansible.builtin.debug:
+    msg: "Série {{ _k8s_upgrade_series }} pas encore active : installation de {{ k8s_upgrade_packages | join(', ') }} en {{ _k8s_upgrade_deb_version }} jouée à l'apply."
+  when: ansible_check_mode and _k8s_repo is changed
+
+- name: "Packages | Install {{ k8s_upgrade_packages | join(', ') }} = {{ _k8s_upgrade_deb_version }}"
+  ansible.builtin.apt:
+    name: "{{ k8s_upgrade_packages | map('regex_replace', '$', '=' ~ _k8s_upgrade_deb_version) | list }}"
+    state: present
+    allow_downgrade: "{{ k8s_upgrade_allow_downgrade }}"
+    allow_change_held_packages: true
+  environment: "{{ k8s_upgrade_environment }}"
+  when: not (ansible_check_mode and _k8s_repo is changed)
+
+- name: "Packages | Hold {{ k8s_upgrade_packages | join(', ') }}"
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ k8s_upgrade_packages }}"
+  when: k8s_upgrade_hold | bool
+
+- name: "Verify | Read installed versions"
+  ansible.builtin.command:
+    cmd: "dpkg-query -W -f='${Version}' {{ item }}"
+  loop: "{{ k8s_upgrade_packages }}"
+  register: _k8s_installed
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: "Verify | Packages are at {{ _k8s_upgrade_deb_version }}"
+  ansible.builtin.assert:
+    that: item.stdout == _k8s_upgrade_deb_version
+    fail_msg: "{{ item.item }} est en {{ item.stdout }}, attendu {{ _k8s_upgrade_deb_version }}."
+    quiet: true
+  loop: "{{ _k8s_installed.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not ansible_check_mode

@@ -1,0 +1,41 @@
+---
+# k8s_upgrade_control_plane defaults
+
+# Version Kubernetes cible, x.y.z (ex : "1.28.15"). Requis.
+k8s_upgrade_version: ""
+
+# prepare : kubeadm à la cible (via k8s_upgrade_packages), garde-fous, pré-pull des images,
+#           `kubeadm upgrade plan` — puis STOP : rien ne touche au control plane
+#           (ni sauvegarde, ni snapshot, ni apply/node). Rejouable à volonté.
+# apply   : déroulé complet (sauvegardes prises juste avant l'upgrade).
+k8s_upgrade_mode: apply
+
+# Nom d'inventaire du control-plane qui joue `kubeadm upgrade apply`. Requis.
+# Les autres control-planes jouent `kubeadm upgrade node`, APRÈS lui (serial: 1).
+k8s_primary_cp_host: ""
+
+# Nom du nœud Kubernetes de cet hôte (suffixe des static pods etcd-<nœud>…).
+k8s_upgrade_node_name: "{{ ansible_hostname | lower }}"
+
+k8s_upgrade_kubeconfig: "/etc/kubernetes/admin.conf"
+k8s_upgrade_manifests_dir: "/etc/kubernetes/manifests"
+k8s_upgrade_etcd_pki_dir: "/etc/kubernetes/pki/etcd"
+
+# Sauvegardes, rangées sous <backup_dir>/v<version>/ sur chaque control-plane.
+k8s_upgrade_backup_dir: "/root/k8s-upgrade-backups"
+k8s_upgrade_backup_config: true        # copie de /etc/kubernetes (certs, manifests, kubeconfigs)
+k8s_upgrade_etcd_snapshot: true        # snapshot etcd, sur le primaire, avant apply
+
+# Pré-télécharge les images : échoue tôt si le registre/proxy est inaccessible.
+k8s_upgrade_prepull_images: true
+
+# Affiche la sortie de `kubeadm upgrade plan` (primaire).
+k8s_upgrade_show_plan: true
+
+# Arguments additionnels. ex : ["--ignore-preflight-errors=KubeletVersion"]
+k8s_upgrade_apply_extra_args: []
+k8s_upgrade_node_extra_args: []
+
+# Attente de la santé après upgrade (apiserver local, static pods, etcd).
+k8s_upgrade_health_retries: 60
+k8s_upgrade_health_delay: 5

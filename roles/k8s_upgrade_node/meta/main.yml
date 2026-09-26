@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  role_name: k8s_upgrade_node
+  author: rridane
+  description: >
+    Monte le kubelet d'un nœud kubeadm (control-plane ou worker) à la version cible :
+    garde-fous de skew, drain, paquets, kubeadm upgrade node (worker), ajustements
+    (--container-runtime, sandbox_image), restart du kubelet, attente Ready, uncordon.
+  license: MIT
+  min_ansible_version: "2.14"
+  galaxy_tags:
+    - kubernetes
+    - kubeadm
+    - upgrade
+dependencies: []

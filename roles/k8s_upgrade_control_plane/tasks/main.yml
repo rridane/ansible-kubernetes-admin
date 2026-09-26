@@ -1,0 +1,392 @@
+---
+# roles/k8s_upgrade_control_plane/tasks/main.yml
+# Monte UN control-plane kubeadm d'une mineure (ou d'un patch). À jouer en serial: 1,
+# primaire d'abord :
+#   - primaire (k8s_primary_cp_host) : snapshot etcd, `kubeadm upgrade plan` puis `apply`
+#   - autres control-planes          : `kubeadm upgrade node`
+# kubeadm doit déjà être à la version cible (rôle k8s_upgrade_packages). Le kubelet
+# n'est PAS touché ici : il suit nœud par nœud (rôle k8s_upgrade_node).
+# Idempotent : un nœud dont l'apiserver local est déjà à la cible est sauté.
+
+- name: "Validate | Inputs"
+  ansible.builtin.assert:
+    that:
+      - _k8s_upgrade_semver is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - (k8s_primary_cp_host | trim) | length > 0
+      - k8s_upgrade_mode in ['prepare', 'apply']
+    fail_msg: "k8s_upgrade_version (x.y.z) et k8s_primary_cp_host sont requis ; k8s_upgrade_mode vaut prepare ou apply."
+    quiet: true
+
+- name: "Validate | This host is a control-plane"
+  ansible.builtin.stat:
+    path: "{{ k8s_upgrade_manifests_dir }}/kube-apiserver.yaml"
+  register: _k8s_apiserver_manifest_stat
+
+- name: "Validate | Fail if no kube-apiserver static pod here"
+  ansible.builtin.fail:
+    msg: "{{ inventory_hostname }} n'a pas de {{ k8s_upgrade_manifests_dir }}/kube-apiserver.yaml : ce n'est pas un control-plane kubeadm."
+  when: not _k8s_apiserver_manifest_stat.stat.exists
+
+# --- Découverte (lecture seule, jouée aussi en plan) --------------------------
+
+- name: "Discover | Read local kube-apiserver manifest"
+  ansible.builtin.slurp:
+    src: "{{ k8s_upgrade_manifests_dir }}/kube-apiserver.yaml"
+  register: _k8s_apiserver_manifest
+
+- name: "Discover | kubeadm version"
+  ansible.builtin.command:
+    cmd: kubeadm version -o short
+  register: _k8s_kubeadm_version
+  changed_when: false
+  check_mode: false
+
+- name: "Discover | Node {{ k8s_upgrade_node_name }} exists"
+  ansible.builtin.command:
+    cmd: "{{ _k8s_kubectl }} get node {{ k8s_upgrade_node_name }} -o name"
+  register: _k8s_node_lookup
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: "Discover | Fail if the node name is unknown"
+  ansible.builtin.fail:
+    msg: >-
+      Nœud '{{ k8s_upgrade_node_name }}' introuvable dans le cluster ({{ _k8s_node_lookup.stderr | default('') | trim }}).
+      Fixer k8s_upgrade_node_name pour {{ inventory_hostname }}.
+  when: _k8s_node_lookup.rc != 0
+
+- name: "Discover | Cluster version (kubeadm-config)"
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ k8s_upgrade_kubeconfig }}"
+      - -n
+      - kube-system
+      - get
+      - cm
+      - kubeadm-config
+      - -o
+      - jsonpath={.data.ClusterConfiguration}
+  register: _k8s_cluster_config
+  changed_when: false
+  check_mode: false
+
+- name: "Discover | Control-plane nodes readiness"
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ k8s_upgrade_kubeconfig }}"
+      - get
+      - nodes
+      - -l
+      - node-role.kubernetes.io/control-plane
+      - -o
+      - jsonpath={range .items[*]}{.metadata.name}={.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}
+  register: _k8s_cp_nodes
+  changed_when: false
+  check_mode: false
+
+- name: "Discover | kube-apiserver versions across the cluster"
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ k8s_upgrade_kubeconfig }}"
+      - -n
+      - kube-system
+      - get
+      - pods
+      - -l
+      - component=kube-apiserver
+      - -o
+      - jsonpath={range .items[*]}{.spec.nodeName}={.spec.containers[0].image}{"\n"}{end}
+  register: _k8s_apiservers
+  changed_when: false
+  check_mode: false
+
+- name: "Discover | Compute facts"
+  ansible.builtin.set_fact:
+    _k8s_local_version: "{{ _k8s_apiserver.image.split(':') | last }}"
+    _k8s_advertise_address: "{{ (_k8s_apiserver.command | select('match', '^--advertise-address=') | first | default('--advertise-address=127.0.0.1')).split('=', 1) | last }}"
+    _k8s_secure_port: "{{ (_k8s_apiserver.command | select('match', '^--secure-port=') | first | default('--secure-port=6443')).split('=', 1) | last }}"
+    _k8s_cluster_version: "{{ (_k8s_cluster_config.stdout | from_yaml).kubernetesVersion }}"
+    _k8s_cp_not_ready: "{{ _k8s_cp_nodes.stdout_lines | reject('match', '^.*=True$') | list }}"
+    _k8s_apiserver_versions: "{{ _k8s_apiservers.stdout_lines | map('regex_replace', '^.*:v', '') | list }}"
+    _k8s_kubeadm_ready: "{{ (_k8s_kubeadm_version.stdout | trim) == _k8s_upgrade_target }}"
+  vars:
+    _k8s_apiserver: "{{ (_k8s_apiserver_manifest.content | b64decode | from_yaml).spec.containers[0] }}"
+
+- name: "Discover | Set skip flag"
+  ansible.builtin.set_fact:
+    _k8s_done: "{{ _k8s_local_version == _k8s_upgrade_target }}"
+
+- name: "Discover | Summary"
+  ansible.builtin.debug:
+    msg:
+      - "nœud            : {{ k8s_upgrade_node_name }} ({{ _k8s_upgrade_is_primary | ternary('primaire : upgrade apply', 'secondaire : upgrade node') }}) — mode {{ k8s_upgrade_mode }}"
+      - "cluster         : {{ _k8s_cluster_version }} → cible {{ _k8s_upgrade_target }}"
+      - "apiserver local : {{ _k8s_local_version }}{{ _k8s_done | ternary(' (déjà à la cible : rien à faire)', '') }}"
+      - "apiservers      : {{ _k8s_apiservers.stdout_lines | join(', ') }}"
+      - "kubeadm         : {{ _k8s_kubeadm_version.stdout | trim }}"
+
+# --- Garde-fous ---------------------------------------------------------------
+
+- name: "Guard | All control-plane nodes Ready"
+  ansible.builtin.assert:
+    that: _k8s_cp_not_ready | length == 0
+    fail_msg: "Control-planes non Ready : {{ _k8s_cp_not_ready | join(', ') }}. Pas d'upgrade sur un control plane dégradé."
+    quiet: true
+  when: not _k8s_done
+
+- name: "Guard | Primary : one minor at a time, no downgrade, previous hop finished"
+  ansible.builtin.assert:
+    that:
+      - (_k8s_upgrade_target_minor | int) - (_k8s_cluster_minor | int) in [0, 1]
+      - _k8s_upgrade_semver is version(_k8s_cluster_version | regex_replace('^v', ''), '>=')
+      - _k8s_apiserver_versions | map('regex_replace', '^([0-9]+\.[0-9]+)\..*$', '\\1') | unique | list == [_k8s_cluster_minor_str]
+    fail_msg: >-
+      Cluster en {{ _k8s_cluster_version }}, cible {{ _k8s_upgrade_target }} : kubeadm ne monte que d'une
+      mineure à la fois, sans redescente, et tous les apiservers doivent avoir fini le saut précédent
+      (actuellement : {{ _k8s_apiserver_versions | join(', ') }}).
+    quiet: true
+  vars:
+    _k8s_cluster_minor_str: "{{ (_k8s_cluster_version | regex_replace('^v', '')).split('.')[:2] | join('.') }}"
+    _k8s_cluster_minor: "{{ _k8s_cluster_minor_str.split('.')[1] }}"
+  when:
+    - _k8s_upgrade_is_primary
+    - not _k8s_done
+
+- name: "Guard | Secondary : the primary has applied the target"
+  ansible.builtin.assert:
+    that: _k8s_cluster_version == _k8s_upgrade_target
+    fail_msg: >-
+      Le cluster est encore en {{ _k8s_cluster_version }} : `kubeadm upgrade apply {{ _k8s_upgrade_target }}`
+      doit d'abord passer sur {{ k8s_primary_cp_host }}.
+    quiet: true
+  when:
+    - not _k8s_upgrade_is_primary
+    - not _k8s_done
+    - _k8s_upgrade_apply
+    - not ansible_check_mode
+
+- name: "Guard | kubeadm is at the target"
+  ansible.builtin.assert:
+    that: _k8s_kubeadm_ready
+    fail_msg: "kubeadm est en {{ _k8s_kubeadm_version.stdout | trim }}, attendu {{ _k8s_upgrade_target }} : jouer k8s_upgrade_packages avant."
+    quiet: true
+  when:
+    - not _k8s_done
+    - _k8s_upgrade_apply
+    - not ansible_check_mode
+
+- name: "Guard | etcd cluster healthy"
+  ansible.builtin.command:
+    cmd: "{{ _k8s_etcdctl }} endpoint health --cluster"
+  register: _k8s_etcd_health_pre
+  changed_when: false
+  check_mode: false
+  when: not _k8s_done
+
+# --- Sauvegardes ----------------------------------------------------------------
+
+- name: "Backup | Ensure {{ _k8s_upgrade_backup_path }}"
+  ansible.builtin.file:
+    path: "{{ _k8s_upgrade_backup_path }}"
+    state: directory
+    mode: "0700"
+  when:
+    - not _k8s_done
+    - _k8s_upgrade_apply
+
+- name: "Backup | Copy /etc/kubernetes"
+  ansible.builtin.command:
+    cmd: "cp -a /etc/kubernetes {{ _k8s_upgrade_backup_path }}/etc-kubernetes"
+    creates: "{{ _k8s_upgrade_backup_path }}/etc-kubernetes"
+  when:
+    - not _k8s_done
+    - _k8s_upgrade_apply
+    - k8s_upgrade_backup_config | bool
+
+- name: "Backup | etcd snapshot (primary)"
+  when:
+    - _k8s_upgrade_is_primary
+    - not _k8s_done
+    - _k8s_upgrade_apply
+    - k8s_upgrade_etcd_snapshot | bool
+  block:
+    - name: "Backup | Read etcd manifest (data dir)"
+      ansible.builtin.slurp:
+        src: "{{ k8s_upgrade_manifests_dir }}/etcd.yaml"
+      register: _k8s_etcd_manifest
+
+    # kubeadm monte le data dir etcd au même chemin dans le pod : le snapshot, écrit
+    # depuis le conteneur, atterrit sur l'hôte. On le sort ensuite du data dir.
+    - name: "Backup | Snapshot save"
+      ansible.builtin.command:
+        cmd: "{{ _k8s_etcdctl }} snapshot save {{ _k8s_etcd_data_dir }}/k8s-upgrade-{{ _k8s_upgrade_target }}.db"
+        creates: "{{ _k8s_upgrade_backup_path }}/etcd-snapshot.db"
+      vars:
+        _k8s_etcd_data_dir: "{{ (_k8s_etcd_cmd | select('match', '^--data-dir=') | first).split('=', 1) | last }}"
+        _k8s_etcd_cmd: "{{ (_k8s_etcd_manifest.content | b64decode | from_yaml).spec.containers[0].command }}"
+
+    - name: "Backup | Move the snapshot out of the etcd data dir"
+      ansible.builtin.command:
+        cmd: "mv {{ _k8s_etcd_data_dir }}/k8s-upgrade-{{ _k8s_upgrade_target }}.db {{ _k8s_upgrade_backup_path }}/etcd-snapshot.db"
+        creates: "{{ _k8s_upgrade_backup_path }}/etcd-snapshot.db"
+      vars:
+        _k8s_etcd_data_dir: "{{ (_k8s_etcd_cmd | select('match', '^--data-dir=') | first).split('=', 1) | last }}"
+        _k8s_etcd_cmd: "{{ (_k8s_etcd_manifest.content | b64decode | from_yaml).spec.containers[0].command }}"
+
+    - name: "Backup | Check the snapshot"
+      ansible.builtin.stat:
+        path: "{{ _k8s_upgrade_backup_path }}/etcd-snapshot.db"
+      register: _k8s_snapshot
+
+    - name: "Backup | Fail if the snapshot is empty"
+      ansible.builtin.assert:
+        that: _k8s_snapshot.stat.exists and _k8s_snapshot.stat.size > 0
+        fail_msg: "Snapshot etcd absent ou vide : {{ _k8s_upgrade_backup_path }}/etcd-snapshot.db"
+        quiet: true
+      when: not ansible_check_mode
+
+# --- Upgrade ----------------------------------------------------------------------
+# Échoue tôt si le registre ou le proxy est inaccessible, et raccourcit le restart.
+
+- name: "Upgrade | Pre-pull control-plane images"
+  ansible.builtin.command:
+    cmd: "kubeadm config images pull --kubernetes-version {{ _k8s_upgrade_target }}"
+  changed_when: false
+  when:
+    - not _k8s_done
+    - k8s_upgrade_prepull_images | bool
+
+- name: "Upgrade | kubeadm upgrade plan (primary)"
+  ansible.builtin.command:
+    cmd: "kubeadm upgrade plan {{ _k8s_upgrade_target }}"
+  register: _k8s_plan
+  changed_when: false
+  check_mode: false
+  when:
+    - _k8s_upgrade_is_primary
+    - not _k8s_done
+    - _k8s_kubeadm_ready
+
+- name: "Upgrade | Show plan"
+  ansible.builtin.debug:
+    var: _k8s_plan.stdout_lines
+  when:
+    - k8s_upgrade_show_plan | bool
+    - _k8s_plan is not skipped
+    - _k8s_plan.stdout_lines is defined
+
+- name: "Upgrade | kubeadm upgrade apply {{ _k8s_upgrade_target }} (primary)"
+  ansible.builtin.command:
+    cmd: "kubeadm upgrade apply {{ _k8s_upgrade_target }} --yes {{ k8s_upgrade_apply_extra_args | join(' ') }}"
+  register: _k8s_apply
+  changed_when: true
+  when:
+    - _k8s_upgrade_is_primary
+    - not _k8s_done
+    - _k8s_upgrade_apply
+
+- name: "Upgrade | kubeadm upgrade node (secondary)"
+  ansible.builtin.command:
+    cmd: "kubeadm upgrade node {{ k8s_upgrade_node_extra_args | join(' ') }}"
+  register: _k8s_upgrade_node
+  changed_when: true
+  when:
+    - not _k8s_upgrade_is_primary
+    - not _k8s_done
+    - _k8s_upgrade_apply
+
+# --- Contrôles ----------------------------------------------------------------------
+
+- name: "Verify | Local kube-apiserver answers /readyz"
+  ansible.builtin.command:
+    cmd: "{{ _k8s_kubectl }} --server https://{{ _k8s_advertise_address }}:{{ _k8s_secure_port }} get --raw=/readyz"
+  register: _k8s_readyz
+  changed_when: false
+  until: _k8s_readyz.rc == 0
+  retries: "{{ k8s_upgrade_health_retries }}"
+  delay: "{{ k8s_upgrade_health_delay }}"
+  when:
+    - not _k8s_done
+    - _k8s_upgrade_apply
+    - not ansible_check_mode
+
+- name: "Verify | Local control-plane static pods at {{ _k8s_upgrade_target }} and Ready"
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ k8s_upgrade_kubeconfig }}"
+      - -n
+      - kube-system
+      - get
+      - pods
+      - -l
+      - tier=control-plane
+      - --field-selector
+      - "spec.nodeName={{ k8s_upgrade_node_name }}"
+      - -o
+      - jsonpath={range .items[*]}{.metadata.labels.component} {.spec.containers[0].image} {.status.containerStatuses[0].ready}{"\n"}{end}
+  register: _k8s_cp_pods
+  changed_when: false
+  until: >-
+    _k8s_cp_pods.stdout_lines
+    | select('match', '^(kube-apiserver|kube-controller-manager|kube-scheduler) \S+:' ~ (_k8s_upgrade_target | regex_escape) ~ ' true$')
+    | list | length == 3
+  retries: "{{ k8s_upgrade_health_retries }}"
+  delay: "{{ k8s_upgrade_health_delay }}"
+  when:
+    - not _k8s_done
+    - _k8s_upgrade_apply
+    - not ansible_check_mode
+
+- name: "Verify | etcd cluster healthy"
+  ansible.builtin.command:
+    cmd: "{{ _k8s_etcdctl }} endpoint health --cluster"
+  register: _k8s_etcd_health_post
+  changed_when: false
+  until: _k8s_etcd_health_post.rc == 0
+  retries: "{{ k8s_upgrade_health_retries }}"
+  delay: "{{ k8s_upgrade_health_delay }}"
+  when:
+    - not _k8s_done
+    - _k8s_upgrade_apply
+    - not ansible_check_mode
+
+- name: "Verify | Cluster version is now {{ _k8s_upgrade_target }} (primary)"
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ k8s_upgrade_kubeconfig }}"
+      - -n
+      - kube-system
+      - get
+      - cm
+      - kubeadm-config
+      - -o
+      - jsonpath={.data.ClusterConfiguration}
+  register: _k8s_cluster_config_post
+  changed_when: false
+  failed_when: (_k8s_cluster_config_post.stdout | from_yaml).kubernetesVersion != _k8s_upgrade_target
+  when:
+    - _k8s_upgrade_is_primary
+    - not _k8s_done
+    - _k8s_upgrade_apply
+    - not ansible_check_mode
+
+- name: "Done"
+  ansible.builtin.debug:
+    msg: >-
+      {{ k8s_upgrade_node_name }} :
+      {% if _k8s_done %}control plane déjà en {{ _k8s_upgrade_target }}
+      {%- elif not _k8s_upgrade_apply %}préparé pour {{ _k8s_upgrade_target }} (kubeadm, images{{ _k8s_upgrade_is_primary | ternary(', plan', '') }}) — rien appliqué, relancer en mode apply
+      {%- elif ansible_check_mode %}plan seulement, rien appliqué
+      {%- else %}control plane en {{ _k8s_upgrade_target }}{% endif %}.
+      Kubelet non touché — il suit avec k8s_upgrade_node.

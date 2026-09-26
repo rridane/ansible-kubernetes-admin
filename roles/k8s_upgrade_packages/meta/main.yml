@@ -1,0 +1,20 @@
+---
+galaxy_info:
+  role_name: k8s_upgrade_packages
+  author: rridane
+  description: >
+    Amène kubeadm/kubelet/kubectl d'un nœud à une version cible : bascule le dépôt
+    pkgs.k8s.io sur la série cible, rafraîchit la clé (y compris la copie périmée des
+    séries EOL), installe à la version exacte puis fige les paquets (hold).
+  license: MIT
+  min_ansible_version: "2.14"
+  platforms:
+    - name: Ubuntu
+      versions: ["focal", "jammy", "noble"]
+    - name: Debian
+      versions: ["bookworm"]
+  galaxy_tags:
+    - kubernetes
+    - kubeadm
+    - upgrade
+dependencies: []

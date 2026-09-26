@@ -1,0 +1,85 @@
+---
+# roles/k8s_upgrade_node/tasks/ready_attempt.yml
+# UNE attente du nœud Ready à la cible (k8s_upgrade_ready_retries × k8s_upgrade_ready_delay).
+# Inclus en boucle par main.yml ; no-op dès que le nœud est revenu (_k8s_ready).
+# Échec => diagnostic kubelet (status + journal), puis pause (interactif) ou nouvelle attente.
+# C'est le cas le plus sensible : nœud drainé, kubelet à la nouvelle version qui ne remonte pas.
+
+- name: "Kubelet | Wait for Ready at {{ _k8s_upgrade_target }} ({{ _k8s_ready_attempt }}/{{ k8s_upgrade_ready_max_attempts }})"
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ k8s_upgrade_kubeconfig }}"
+      - get
+      - node
+      - "{{ k8s_upgrade_node_name }}"
+      - -o
+      - jsonpath={.status.nodeInfo.kubeletVersion}|{.status.conditions[?(@.type=="Ready")].status}
+  delegate_to: "{{ k8s_primary_cp_host }}"
+  register: _k8s_node_after
+  changed_when: false
+  until: _k8s_node_after.stdout == _k8s_upgrade_target ~ '|True'
+  retries: "{{ k8s_upgrade_ready_retries }}"
+  delay: "{{ k8s_upgrade_ready_delay }}"
+  ignore_errors: true
+  when: not _k8s_ready
+
+- name: "Kubelet | Mark Ready"
+  ansible.builtin.set_fact:
+    _k8s_ready: true
+  when:
+    - not _k8s_ready
+    - _k8s_node_after is succeeded
+
+- name: "Kubelet | Not back : diagnose and wait"
+  when: not _k8s_ready
+  block:
+    - name: "Kubelet | systemctl status kubelet"
+      ansible.builtin.command:
+        cmd: systemctl status kubelet --no-pager --lines=0
+      register: _k8s_kubelet_status
+      changed_when: false
+      failed_when: false
+
+    - name: "Kubelet | journalctl -u kubelet"
+      ansible.builtin.command:
+        cmd: journalctl -u kubelet --no-pager -n 30 -o cat
+      register: _k8s_kubelet_journal
+      changed_when: false
+      failed_when: false
+
+    - name: "Kubelet | Report"
+      ansible.builtin.debug:
+        msg:
+          - "{{ k8s_upgrade_node_name }} n'est pas revenu Ready en {{ _k8s_upgrade_target }} (vu : '{{ _k8s_node_after.stdout | default('') }}'). Nœud drainé."
+          - "--- systemctl status kubelet ---"
+          - "{{ _k8s_kubelet_status.stdout_lines | default([]) }}"
+          - "--- journalctl -u kubelet (30 dernières lignes) ---"
+          - "{{ _k8s_kubelet_journal.stdout_lines | default([]) }}"
+
+    - name: "Kubelet | Give up after the last attempt"
+      ansible.builtin.fail:
+        msg: >-
+          {{ k8s_upgrade_node_name }} toujours pas Ready en {{ _k8s_upgrade_target }} après
+          {{ k8s_upgrade_ready_max_attempts }} attentes. Nœud DRAINÉ et cordonné : corriger le kubelet
+          (journalctl -u kubelet) puis relancer, ou revenir en arrière sur les paquets.
+      when: (_k8s_ready_attempt | int) >= (k8s_upgrade_ready_max_attempts | int)
+
+    - name: "Kubelet | Wait for the operator"
+      ansible.builtin.pause:
+        prompt: |-
+
+          Kubelet de {{ k8s_upgrade_node_name }} pas revenu — voir le rapport ci-dessus.
+          Corriger sur le nœud (flags, config, containerd…), puis :
+            [Entrée]  nouvelle attente ({{ (_k8s_ready_attempt | int) + 1 }}/{{ k8s_upgrade_ready_max_attempts }})
+            abort     arrêter ici (nœud laissé drainé)
+      register: _k8s_ready_answer
+      when: k8s_upgrade_interactive | bool
+
+    - name: "Kubelet | Aborted by the operator"
+      ansible.builtin.fail:
+        msg: "Arrêt demandé. {{ k8s_upgrade_node_name }} reste DRAINÉ et cordonné, kubelet à vérifier."
+      when:
+        - k8s_upgrade_interactive | bool
+        - (_k8s_ready_answer.user_input | default('') | trim | lower) == 'abort'

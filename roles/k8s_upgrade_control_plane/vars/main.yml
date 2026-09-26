@@ -1,0 +1,15 @@
+---
+# vars file for k8s_upgrade_control_plane
+_k8s_upgrade_semver: "{{ k8s_upgrade_version | regex_replace('^v', '') }}"
+_k8s_upgrade_target: "v{{ _k8s_upgrade_semver }}"
+_k8s_upgrade_target_minor: "{{ _k8s_upgrade_semver.split('.')[1] | int }}"
+_k8s_upgrade_apply: "{{ k8s_upgrade_mode == 'apply' }}"
+_k8s_upgrade_is_primary: "{{ inventory_hostname == k8s_primary_cp_host }}"
+_k8s_upgrade_backup_path: "{{ k8s_upgrade_backup_dir }}/{{ _k8s_upgrade_target }}"
+_k8s_kubectl: "kubectl --kubeconfig {{ k8s_upgrade_kubeconfig }}"
+_k8s_etcdctl: >-
+  {{ _k8s_kubectl }} -n kube-system exec etcd-{{ k8s_upgrade_node_name }} -- etcdctl
+  --endpoints=https://127.0.0.1:2379
+  --cacert={{ k8s_upgrade_etcd_pki_dir }}/ca.crt
+  --cert={{ k8s_upgrade_etcd_pki_dir }}/healthcheck-client.crt
+  --key={{ k8s_upgrade_etcd_pki_dir }}/healthcheck-client.key

@@ -1,0 +1,104 @@
+---
+# roles/k8s_upgrade_node/tasks/drain_attempt.yml
+# UNE tentative de drain (bornée par k8s_upgrade_drain_attempt_timeout). Inclus en boucle
+# par main.yml ; no-op dès que le nœud est drainé (_k8s_drained).
+# Échec => diagnostic (pods restants, PDB bloquants, erreur kubectl), puis :
+#   - interactif     : pause illimitée — on débloque, [Entrée] = nouvelle tentative, abort = stop
+#   - non interactif : nouvelle tentative directe
+# Dernière tentative ratée => échec du rôle. Le nœud reste cordonné, le kubelet n'a pas été touché.
+
+- name: "Drain | Attempt {{ _k8s_drain_attempt }}/{{ k8s_upgrade_drain_max_attempts }} ({{ k8s_upgrade_drain_attempt_timeout }})"
+  ansible.builtin.command:
+    cmd: >-
+      {{ _k8s_kubectl }} drain {{ k8s_upgrade_node_name }}
+      {{ (k8s_upgrade_drain_args + k8s_upgrade_drain_extra_args) | join(' ') }}
+      --timeout={{ k8s_upgrade_drain_attempt_timeout }}
+  delegate_to: "{{ k8s_primary_cp_host }}"
+  register: _k8s_drain
+  changed_when: _k8s_drain.rc == 0
+  failed_when: false
+  when: not _k8s_drained
+
+- name: "Drain | Mark drained"
+  ansible.builtin.set_fact:
+    _k8s_drained: true
+  when:
+    - not _k8s_drained
+    - _k8s_drain.rc == 0
+
+- name: "Drain | Blocked : diagnose and wait"
+  when: not _k8s_drained
+  block:
+    # Pods encore sur le nœud (hors terminés). Le propriétaire dit pourquoi ils restent :
+    # DaemonSet et Node (static pods) sont ignorés par le drain ; vide = pod sans contrôleur.
+    - name: "Drain | Pods still on the node"
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ k8s_upgrade_kubeconfig }}"
+          - get
+          - pods
+          - -A
+          - --field-selector
+          - "spec.nodeName={{ k8s_upgrade_node_name }},status.phase!=Succeeded,status.phase!=Failed"
+          - -o
+          - jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name} owner={.metadata.ownerReferences[0].kind} deleting={.metadata.deletionTimestamp}{"\n"}{end}
+      delegate_to: "{{ k8s_primary_cp_host }}"
+      register: _k8s_drain_pods
+      changed_when: false
+      failed_when: false
+
+    # PDB qui n'autorisent plus aucune éviction (hors PDB orphelins : 0 pod attendu).
+    - name: "Drain | PodDisruptionBudgets allowing no disruption"
+      ansible.builtin.command:
+        argv:
+          - kubectl
+          - --kubeconfig
+          - "{{ k8s_upgrade_kubeconfig }}"
+          - get
+          - pdb
+          - -A
+          - -o
+          - jsonpath={range .items[*]}{.metadata.namespace}/{.metadata.name} allowed={.status.disruptionsAllowed} healthy={.status.currentHealthy}/{.status.expectedPods} minAvailable={.spec.minAvailable} maxUnavailable={.spec.maxUnavailable}{"\n"}{end}
+      delegate_to: "{{ k8s_primary_cp_host }}"
+      register: _k8s_drain_pdbs
+      changed_when: false
+      failed_when: false
+
+    - name: "Drain | Report"
+      ansible.builtin.debug:
+        msg:
+          - "Drain de {{ k8s_upgrade_node_name }} bloqué (tentative {{ _k8s_drain_attempt }}/{{ k8s_upgrade_drain_max_attempts }}). Le nœud est cordonné, le kubelet n'a pas été touché."
+          - "--- kubectl drain (fin) ---"
+          - "{{ (_k8s_drain.stderr_lines | default([]))[-12:] }}"
+          - "--- pods à déplacer (owner vide = sans contrôleur : --force ou suppression manuelle) ---"
+          - "{{ _k8s_drain_pods.stdout_lines | default([]) | reject('search', 'owner=(DaemonSet|Node) ') | list }}"
+          - "--- PDB n'autorisant aucune éviction ---"
+          - "{{ _k8s_drain_pdbs.stdout_lines | default([]) | select('search', 'allowed=0 ') | reject('search', '/0 ') | list }}"
+
+    - name: "Drain | Give up after the last attempt"
+      ansible.builtin.fail:
+        msg: >-
+          Drain de {{ k8s_upgrade_node_name }} impossible après {{ k8s_upgrade_drain_max_attempts }} tentatives.
+          Nœud laissé CORDONNÉ, kubelet intact : débloquer puis relancer (le rôle reprend),
+          ou `kubectl uncordon {{ k8s_upgrade_node_name }}` pour renoncer.
+      when: (_k8s_drain_attempt | int) >= (k8s_upgrade_drain_max_attempts | int)
+
+    - name: "Drain | Wait for the operator"
+      ansible.builtin.pause:
+        prompt: |-
+
+          Drain de {{ k8s_upgrade_node_name }} bloqué — voir le rapport ci-dessus.
+          Débloquer (scale, PDB, suppression d'un pod nu…), puis :
+            [Entrée]  nouvelle tentative ({{ (_k8s_drain_attempt | int) + 1 }}/{{ k8s_upgrade_drain_max_attempts }})
+            abort     arrêter ici (nœud laissé cordonné)
+      register: _k8s_drain_answer
+      when: k8s_upgrade_interactive | bool
+
+    - name: "Drain | Aborted by the operator"
+      ansible.builtin.fail:
+        msg: "Arrêt demandé. {{ k8s_upgrade_node_name }} reste CORDONNÉ (kubelet intact) : `kubectl uncordon {{ k8s_upgrade_node_name }}` pour le remettre en service."
+      when:
+        - k8s_upgrade_interactive | bool
+        - (_k8s_drain_answer.user_input | default('') | trim | lower) == 'abort'

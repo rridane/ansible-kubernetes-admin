@@ -1,0 +1,333 @@
+---
+# roles/k8s_upgrade_node/tasks/main.yml
+# Monte le kubelet d'UN nœud (control-plane ou worker) à la version cible, en
+# serial: 1, une fois tous les control-planes à la cible :
+#   drain → paquets (kubeadm/kubelet/kubectl) → [worker] kubeadm upgrade node
+#   → ajustements (flag --container-runtime, sandbox_image) → restart kubelet
+#   → attente Ready à la cible → uncordon.
+# Les kubectl sont délégués à k8s_primary_cp_host (admin.conf).
+# Idempotent : un nœud dont le kubelet est déjà à la cible est sauté (pas de drain).
+
+- name: "Validate | Inputs"
+  ansible.builtin.assert:
+    that:
+      - _k8s_upgrade_semver is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - (k8s_primary_cp_host | trim) | length > 0
+    fail_msg: "k8s_upgrade_version (x.y.z) et k8s_primary_cp_host sont requis."
+    quiet: true
+
+# --- Découverte (lecture seule, jouée aussi en plan) --------------------------
+
+- name: "Discover | Node state (from {{ k8s_primary_cp_host }})"
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ k8s_upgrade_kubeconfig }}"
+      - get
+      - node
+      - "{{ k8s_upgrade_node_name }}"
+      - -o
+      - jsonpath={.status.nodeInfo.kubeletVersion}|{.spec.unschedulable}|{.status.conditions[?(@.type=="Ready")].status}
+  delegate_to: "{{ k8s_primary_cp_host }}"
+  register: _k8s_node_state
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: "Discover | Fail if the node name is unknown"
+  ansible.builtin.fail:
+    msg: >-
+      Nœud '{{ k8s_upgrade_node_name }}' introuvable ({{ _k8s_node_state.stderr | default('') | trim }}).
+      Fixer k8s_upgrade_node_name pour {{ inventory_hostname }}.
+  when: _k8s_node_state.rc != 0
+
+- name: "Discover | kube-apiserver versions across the cluster"
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ k8s_upgrade_kubeconfig }}"
+      - -n
+      - kube-system
+      - get
+      - pods
+      - -l
+      - component=kube-apiserver
+      - -o
+      - jsonpath={range .items[*]}{.spec.nodeName}={.spec.containers[0].image}{"\n"}{end}
+  delegate_to: "{{ k8s_primary_cp_host }}"
+  register: _k8s_apiservers
+  changed_when: false
+  check_mode: false
+
+# Annotation posée par ce rôle quand C'EST LUI qui cordonne : distingue, à la relance après un
+# arrêt, « cordonné par un upgrade interrompu » (à remettre en service) de « cordonné par un tiers ».
+- name: "Discover | Node annotations"
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - --kubeconfig
+      - "{{ k8s_upgrade_kubeconfig }}"
+      - get
+      - node
+      - "{{ k8s_upgrade_node_name }}"
+      - -o
+      - jsonpath={.metadata.annotations}
+  delegate_to: "{{ k8s_primary_cp_host }}"
+  register: _k8s_node_annotations
+  changed_when: false
+  check_mode: false
+
+- name: "Discover | Local kubelet version"
+  ansible.builtin.command:
+    cmd: kubelet --version
+  register: _k8s_local_kubelet
+  changed_when: false
+  check_mode: false
+
+- name: "Discover | Is this node a control-plane"
+  ansible.builtin.stat:
+    path: "{{ k8s_upgrade_manifests_dir }}/kube-apiserver.yaml"
+  register: _k8s_is_cp_stat
+
+- name: "Discover | Compute facts"
+  ansible.builtin.set_fact:
+    _k8s_node_kubelet_version: "{{ _k8s_node_fields[0] }}"
+    _k8s_node_was_unschedulable: "{{ _k8s_node_fields[1] == 'true' }}"
+    _k8s_node_ready: "{{ _k8s_node_fields[2] == 'True' }}"
+    _k8s_local_kubelet_version: "{{ _k8s_local_kubelet.stdout.split() | last }}"
+    _k8s_apiserver_versions: "{{ _k8s_apiservers.stdout_lines | map('regex_replace', '^.*:v', '') | list }}"
+    _k8s_is_cp: "{{ _k8s_is_cp_stat.stat.exists }}"
+    _k8s_cordon_marked: "{{ k8s_upgrade_cordon_annotation in ((_k8s_node_annotations.stdout | default('', true)) or '{}') | from_json }}"
+  vars:
+    _k8s_node_fields: "{{ (_k8s_node_state.stdout ~ '||').split('|') }}"
+
+# Le rôle peut (re)mettre le nœud en service s'il était schedulable, ou s'il porte la marque
+# d'un upgrade interrompu. Un cordon posé par un tiers est respecté.
+- name: "Discover | Whose cordon"
+  ansible.builtin.set_fact:
+    _k8s_cordon_ours: "{{ (not _k8s_node_was_unschedulable) or _k8s_cordon_marked }}"
+
+- name: "Discover | Set skip flag"
+  ansible.builtin.set_fact:
+    _k8s_done: "{{ _k8s_node_kubelet_version == _k8s_upgrade_target and _k8s_local_kubelet_version == _k8s_upgrade_target }}"
+
+- name: "Discover | Summary"
+  ansible.builtin.debug:
+    msg:
+      - "nœud    : {{ k8s_upgrade_node_name }} ({{ _k8s_is_cp | ternary('control-plane', 'worker') }})"
+      - "kubelet : {{ _k8s_node_kubelet_version }} → cible {{ _k8s_upgrade_target }}{{ _k8s_done | ternary(' (déjà à la cible : rien à faire)', '') }}"
+      - "état    : Ready={{ _k8s_node_ready }} cordonné={{ _k8s_node_was_unschedulable }}{{ _k8s_cordon_marked | ternary(' (par un upgrade interrompu)', '') }}"
+      - "apiservers : {{ _k8s_apiservers.stdout_lines | join(', ') }}"
+
+- name: "Discover | Warn : node already at target but cordoned by someone else"
+  ansible.builtin.debug:
+    msg: "{{ k8s_upgrade_node_name }} est déjà à la cible mais cordonné par un tiers (pas par un upgrade) : laissé tel quel."
+  when:
+    - _k8s_done
+    - _k8s_node_was_unschedulable
+    - not _k8s_cordon_marked
+
+# --- Garde-fous ---------------------------------------------------------------
+
+- name: "Guard | Every kube-apiserver is at or above the target (kubelet never newer than the apiserver)"
+  ansible.builtin.assert:
+    that: _k8s_apiserver_versions | reject('version', _k8s_upgrade_semver, '>=') | list | length == 0
+    fail_msg: >-
+      apiservers : {{ _k8s_apiservers.stdout_lines | join(', ') }}. Monter d'abord tout le control plane
+      en {{ _k8s_upgrade_target }} (k8s_upgrade_control_plane).
+    quiet: true
+  when: not _k8s_done
+
+- name: "Guard | No downgrade, one minor at a time"
+  ansible.builtin.assert:
+    that:
+      - _k8s_upgrade_semver is version(_k8s_node_semver, '>=')
+      - (k8s_upgrade_allow_kubelet_skip | bool) or ((_k8s_upgrade_target_minor | int) - (_k8s_node_semver.split('.')[1] | int)) <= 1
+    fail_msg: >-
+      kubelet en {{ _k8s_node_kubelet_version }}, cible {{ _k8s_upgrade_target }} : pas de redescente, et une
+      mineure à la fois (sinon k8s_upgrade_allow_kubelet_skip: true, ou un passage intermédiaire).
+    quiet: true
+  vars:
+    _k8s_node_semver: "{{ _k8s_node_kubelet_version | regex_replace('^v', '') }}"
+  when: not _k8s_done
+
+# --- Drain --------------------------------------------------------------------
+
+# Posée AVANT le drain (qui cordonne) : si le run s'arrête, la relance saura que ce cordon est le sien.
+- name: "Drain | Mark the cordon as ours ({{ k8s_upgrade_cordon_annotation }})"
+  ansible.builtin.command:
+    cmd: "{{ _k8s_kubectl }} annotate node {{ k8s_upgrade_node_name }} {{ k8s_upgrade_cordon_annotation }}=true --overwrite"
+  delegate_to: "{{ k8s_primary_cp_host }}"
+  register: _k8s_cordon_annotate
+  changed_when: true
+  when:
+    - not _k8s_done
+    - k8s_upgrade_drain | bool
+    - not _k8s_node_was_unschedulable
+
+# Tentatives courtes + diagnostic + pause opérateur en cas de blocage (drain_attempt.yml).
+- name: "Drain | Init"
+  ansible.builtin.set_fact:
+    _k8s_drained: false
+
+- name: "Drain | kubectl drain {{ k8s_upgrade_node_name }}"
+  ansible.builtin.include_tasks: drain_attempt.yml
+  loop: "{{ range(1, (k8s_upgrade_drain_max_attempts | int) + 1) | list }}"
+  loop_control:
+    loop_var: _k8s_drain_attempt
+  when:
+    - not _k8s_done
+    - k8s_upgrade_drain | bool
+    - not ansible_check_mode
+
+- name: "Drain | Would drain {{ k8s_upgrade_node_name }} (plan)"
+  ansible.builtin.debug:
+    msg: "kubectl drain {{ k8s_upgrade_node_name }} — non joué en --check."
+  when:
+    - not _k8s_done
+    - k8s_upgrade_drain | bool
+    - ansible_check_mode
+
+# --- Paquets ------------------------------------------------------------------
+
+- name: "Packages | {{ k8s_upgrade_node_packages | join(', ') }} → {{ _k8s_upgrade_target }}"
+  ansible.builtin.include_role:
+    name: rridane.kubernetes_admin.k8s_upgrade_packages
+  vars:
+    k8s_upgrade_packages: "{{ k8s_upgrade_node_packages }}"
+  when: not _k8s_done
+
+# Sur un control-plane, `kubeadm upgrade node` a déjà été joué par k8s_upgrade_control_plane.
+
+- name: "Upgrade | kubeadm upgrade node (worker : kubelet config)"
+  ansible.builtin.command:
+    cmd: kubeadm upgrade node
+  changed_when: true
+  when:
+    - not _k8s_done
+    - not _k8s_is_cp
+
+# --- Ajustements --------------------------------------------------------------
+
+- name: "Adjust | Check {{ k8s_upgrade_kubeadm_flags_env }}"
+  ansible.builtin.stat:
+    path: "{{ k8s_upgrade_kubeadm_flags_env }}"
+  register: _k8s_flags_env
+  when:
+    - not _k8s_done
+    - k8s_upgrade_remove_container_runtime_flag | bool
+
+- name: "Adjust | Remove --container-runtime=remote (removed in 1.27)"
+  ansible.builtin.replace:
+    path: "{{ k8s_upgrade_kubeadm_flags_env }}"
+    regexp: '--container-runtime=remote\s*'
+    replace: ""
+  when:
+    - not _k8s_done
+    - k8s_upgrade_remove_container_runtime_flag | bool
+    - _k8s_flags_env.stat.exists | default(false)
+    - (_k8s_upgrade_target_minor | int) >= 27
+
+- name: "Adjust | Pause image expected by kubeadm {{ _k8s_upgrade_target }}"
+  ansible.builtin.shell: >-
+    set -o pipefail;
+    kubeadm config images list --kubernetes-version {{ _k8s_upgrade_target }} 2>/dev/null | grep '/pause:'
+  args:
+    executable: /bin/bash
+  register: _k8s_pause_image
+  changed_when: false
+  check_mode: false
+  when:
+    - not _k8s_done
+    - k8s_upgrade_sandbox_image_fix | bool
+
+- name: "Adjust | Check {{ k8s_upgrade_containerd_config }}"
+  ansible.builtin.stat:
+    path: "{{ k8s_upgrade_containerd_config }}"
+  register: _k8s_containerd_config
+  when:
+    - not _k8s_done
+    - k8s_upgrade_sandbox_image_fix | bool
+
+- name: "Adjust | Align containerd sandbox_image"
+  ansible.builtin.replace:
+    path: "{{ k8s_upgrade_containerd_config }}"
+    regexp: '^(\s*)sandbox_image\s*=.*$'
+    replace: '\1sandbox_image = "{{ _k8s_pause_image.stdout | trim }}"'
+  register: _k8s_sandbox
+  when:
+    - not _k8s_done
+    - k8s_upgrade_sandbox_image_fix | bool
+    - _k8s_containerd_config.stat.exists | default(false)
+    - (_k8s_pause_image.stdout | default('') | trim) | length > 0
+
+- name: "Adjust | Restart containerd (sandbox_image changed)"
+  ansible.builtin.systemd:
+    name: containerd
+    state: restarted
+  when: _k8s_sandbox is changed
+
+- name: "Adjust | Pull the pause image through containerd"
+  ansible.builtin.command:
+    cmd: "crictl --runtime-endpoint {{ k8s_upgrade_containerd_socket }} pull {{ _k8s_pause_image.stdout | trim }}"
+  changed_when: false
+  when: _k8s_sandbox is changed
+
+# --- Kubelet ------------------------------------------------------------------
+
+- name: "Kubelet | daemon-reload and restart"
+  ansible.builtin.systemd:
+    name: kubelet
+    state: restarted
+    daemon_reload: true
+  when: not _k8s_done
+
+# Attentes bornées + diagnostic kubelet + pause opérateur si le nœud ne revient pas (ready_attempt.yml).
+- name: "Kubelet | Init"
+  ansible.builtin.set_fact:
+    _k8s_ready: false
+
+- name: "Kubelet | Wait for {{ k8s_upgrade_node_name }} Ready at {{ _k8s_upgrade_target }}"
+  ansible.builtin.include_tasks: ready_attempt.yml
+  loop: "{{ range(1, (k8s_upgrade_ready_max_attempts | int) + 1) | list }}"
+  loop_control:
+    loop_var: _k8s_ready_attempt
+  when:
+    - not _k8s_done
+    - not ansible_check_mode
+
+# --- Remise en service --------------------------------------------------------
+
+# Déjà à la cible mais marqué : reste d'un upgrade interrompu après le restart du kubelet.
+- name: "Uncordon | kubectl uncordon {{ k8s_upgrade_node_name }}"
+  ansible.builtin.command:
+    cmd: "{{ _k8s_kubectl }} uncordon {{ k8s_upgrade_node_name }}"
+  delegate_to: "{{ k8s_primary_cp_host }}"
+  register: _k8s_uncordon
+  changed_when: true
+  when:
+    - k8s_upgrade_uncordon | bool
+    - _k8s_cordon_ours
+    - (not _k8s_done) or (_k8s_cordon_marked and _k8s_node_ready)
+
+- name: "Uncordon | Remove the {{ k8s_upgrade_cordon_annotation }} mark"
+  ansible.builtin.command:
+    cmd: "{{ _k8s_kubectl }} annotate node {{ k8s_upgrade_node_name }} {{ k8s_upgrade_cordon_annotation }}-"
+  delegate_to: "{{ k8s_primary_cp_host }}"
+  changed_when: true
+  when:
+    - _k8s_uncordon is not skipped
+    - _k8s_cordon_marked or (_k8s_cordon_annotate is changed)
+
+- name: "Uncordon | Left cordoned (cordoned by someone else before the upgrade)"
+  ansible.builtin.debug:
+    msg: "{{ k8s_upgrade_node_name }} était cordonné avant l'upgrade (pas par un upgrade) : laissé cordonné."
+  when:
+    - not _k8s_done
+    - not _k8s_cordon_ours
+
+- name: "Done"
+  ansible.builtin.debug:
+    msg: "{{ k8s_upgrade_node_name }} : kubelet en {{ _k8s_upgrade_target }}{{ _k8s_done | ternary(' (déjà fait)', '') }}."

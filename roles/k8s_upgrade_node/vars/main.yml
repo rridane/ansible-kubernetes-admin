@@ -1,0 +1,6 @@
+---
+# vars file for k8s_upgrade_node
+_k8s_upgrade_semver: "{{ k8s_upgrade_version | regex_replace('^v', '') }}"
+_k8s_upgrade_target: "v{{ _k8s_upgrade_semver }}"
+_k8s_upgrade_target_minor: "{{ _k8s_upgrade_semver.split('.')[1] | int }}"
+_k8s_kubectl: "kubectl --kubeconfig {{ k8s_upgrade_kubeconfig }}"

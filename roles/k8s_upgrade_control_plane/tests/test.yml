@@ -1,0 +1,9 @@
+---
+- hosts: localhost
+  remote_user: root
+  become: true
+  vars:
+    k8s_upgrade_version: "1.28.15"
+    k8s_primary_cp_host: localhost
+  roles:
+    - roles/k8s_upgrade_control_plane
