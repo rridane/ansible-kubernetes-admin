@@ -7,6 +7,7 @@ _k8s_upgrade_apply: "{{ k8s_upgrade_mode == 'apply' }}"
 _k8s_upgrade_is_primary: "{{ inventory_hostname == k8s_primary_cp_host }}"
 _k8s_upgrade_backup_path: "{{ k8s_upgrade_backup_dir }}/{{ _k8s_upgrade_target }}"
 _k8s_kubectl: "kubectl --kubeconfig {{ k8s_upgrade_kubeconfig }}"
+_k8s_kubeadm: "{{ (['env'] + (k8s_upgrade_kubeadm_unset_env | map('regex_replace', '^', '-u ') | list) + ['kubeadm']) | join(' ') if (k8s_upgrade_kubeadm_unset_env | length > 0) else 'kubeadm' }}"
 _k8s_etcdctl: >-
   {{ _k8s_kubectl }} -n kube-system exec etcd-{{ k8s_upgrade_node_name }} -- etcdctl
   --endpoints=https://127.0.0.1:2379

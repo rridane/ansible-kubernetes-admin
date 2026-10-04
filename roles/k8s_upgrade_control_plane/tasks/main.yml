@@ -190,6 +190,38 @@
   check_mode: false
   when: not _k8s_done
 
+# --- Espace disque ----------------------------------------------------------------
+
+# Les deux volumes qui reçoivent des écritures : sauvegardes du rôle, et /etc/kubernetes/tmp où
+# kubeadm copie le data dir etcd pendant l'upgrade. On mesure le premier répertoire existant de
+# chaque chemin (il peut ne pas encore exister, ex. en --check).
+- name: "Disk | Free space"
+  ansible.builtin.shell: |
+    p={{ item }}; while [ ! -e "$p" ]; do p=$(dirname "$p"); done
+    df -Pm "$p" | awk 'NR==2 {print $4, $6}'
+  loop:
+    - "{{ k8s_upgrade_backup_dir }}"
+    - /etc/kubernetes/tmp
+  register: _k8s_free
+  changed_when: false
+  check_mode: false
+  when:
+    - not _k8s_done
+    - _k8s_upgrade_apply
+    - (k8s_upgrade_min_free_mb | int) > 0
+
+- name: "Disk | Fail if a volume is too full"
+  ansible.builtin.assert:
+    that: (item.stdout.split()[0] | int) >= (k8s_upgrade_min_free_mb | int)
+    fail_msg: >-
+      {{ item.stdout.split()[1] }} (pour {{ item.item }}) n'a que {{ item.stdout.split()[0] }} Mo libres,
+      {{ k8s_upgrade_min_free_mb }} exigés (k8s_upgrade_min_free_mb) avant les sauvegardes et l'upgrade.
+    quiet: true
+  loop: "{{ _k8s_free.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item is not skipped
+
 # --- Sauvegardes ----------------------------------------------------------------
 
 - name: "Backup | Ensure {{ _k8s_upgrade_backup_path }}"
@@ -201,9 +233,12 @@
     - not _k8s_done
     - _k8s_upgrade_apply
 
-- name: "Backup | Copy /etc/kubernetes"
-  ansible.builtin.command:
-    cmd: "cp -a /etc/kubernetes {{ _k8s_upgrade_backup_path }}/etc-kubernetes"
+# Sans tmp/ : kubeadm y garde ses propres sauvegardes etcd (centaines de Mo).
+- name: "Backup | Copy /etc/kubernetes (without tmp/)"
+  ansible.builtin.shell:
+    cmd: >-
+      mkdir -p {{ _k8s_upgrade_backup_path }}/etc-kubernetes &&
+      tar -C /etc/kubernetes --exclude=./tmp -cf - . | tar -C {{ _k8s_upgrade_backup_path }}/etc-kubernetes -xf -
     creates: "{{ _k8s_upgrade_backup_path }}/etc-kubernetes"
   when:
     - not _k8s_done
@@ -257,7 +292,7 @@
 
 - name: "Upgrade | Pre-pull control-plane images"
   ansible.builtin.command:
-    cmd: "kubeadm config images pull --kubernetes-version {{ _k8s_upgrade_target }}"
+    cmd: "{{ _k8s_kubeadm }} config images pull --kubernetes-version {{ _k8s_upgrade_target }}"
   changed_when: false
   when:
     - not _k8s_done
@@ -265,7 +300,7 @@
 
 - name: "Upgrade | kubeadm upgrade plan (primary)"
   ansible.builtin.command:
-    cmd: "kubeadm upgrade plan {{ _k8s_upgrade_target }}"
+    cmd: "{{ _k8s_kubeadm }} upgrade plan {{ _k8s_upgrade_target }}"
   register: _k8s_plan
   changed_when: false
   check_mode: false
@@ -284,7 +319,7 @@
 
 - name: "Upgrade | kubeadm upgrade apply {{ _k8s_upgrade_target }} (primary)"
   ansible.builtin.command:
-    cmd: "kubeadm upgrade apply {{ _k8s_upgrade_target }} --yes {{ k8s_upgrade_apply_extra_args | join(' ') }}"
+    cmd: "{{ _k8s_kubeadm }} upgrade apply {{ _k8s_upgrade_target }} --yes {{ k8s_upgrade_apply_extra_args | join(' ') }}"
   register: _k8s_apply
   changed_when: true
   when:
@@ -294,7 +329,7 @@
 
 - name: "Upgrade | kubeadm upgrade node (secondary)"
   ansible.builtin.command:
-    cmd: "kubeadm upgrade node {{ k8s_upgrade_node_extra_args | join(' ') }}"
+    cmd: "{{ _k8s_kubeadm }} upgrade node {{ k8s_upgrade_node_extra_args | join(' ') }}"
   register: _k8s_upgrade_node
   changed_when: true
   when:
@@ -358,6 +393,48 @@
     - not _k8s_done
     - _k8s_upgrade_apply
     - not ansible_check_mode
+
+# Seulement les sauvegardes créées par ce passage (plus récentes que le début du play).
+- name: "Upgrade | Move kubeadm backups to {{ _k8s_upgrade_backup_path }}/kubeadm"
+  ansible.builtin.shell: |
+    set -e
+    new=$(find /etc/kubernetes/tmp -mindepth 1 -maxdepth 1 -name 'kubeadm-backup-*' -newermt '{{ ansible_date_time.iso8601 }}')
+    [ -z "$new" ] && exit 0
+    mkdir -p {{ _k8s_upgrade_backup_path }}/kubeadm
+    mv $new {{ _k8s_upgrade_backup_path }}/kubeadm/
+    echo "$new"
+  register: _k8s_kubeadm_moved
+  changed_when: _k8s_kubeadm_moved.stdout | length > 0
+  when:
+    - not _k8s_done
+    - _k8s_upgrade_apply
+    - not ansible_check_mode
+    - k8s_upgrade_move_kubeadm_backups | bool
+
+- name: "Verify | No unset variable in the control-plane manifests"
+  ansible.builtin.shell: >-
+    grep -lE '^ *- name: ({{ k8s_upgrade_kubeadm_unset_env | join('|') }})$'
+    {{ k8s_upgrade_manifests_dir }}/kube-apiserver.yaml
+    {{ k8s_upgrade_manifests_dir }}/kube-controller-manager.yaml
+    {{ k8s_upgrade_manifests_dir }}/kube-scheduler.yaml || true
+  register: _k8s_manifest_env
+  changed_when: false
+  check_mode: false
+  when:
+    - not _k8s_done
+    - _k8s_upgrade_apply
+    - not ansible_check_mode
+    - (k8s_upgrade_kubeadm_unset_env | length) > 0
+
+- name: "Verify | Fail if a manifest still carries one of them"
+  ansible.builtin.assert:
+    that: _k8s_manifest_env.stdout | length == 0
+    fail_msg: >-
+      {{ _k8s_manifest_env.stdout_lines | join(', ') }} contient encore une variable de
+      k8s_upgrade_kubeadm_unset_env : le composant passera par ce proxy pour joindre webhooks et
+      API agrégées. Retirer le bloc env de ce manifest (édition hors du dossier, puis mv).
+    quiet: true
+  when: _k8s_manifest_env is not skipped
 
 - name: "Verify | Cluster version is now {{ _k8s_upgrade_target }} (primary)"
   ansible.builtin.command:

@@ -54,6 +54,22 @@ argument_specs:
         default: true
         description:
           - "Snapshot etcd sur le primaire avant apply."
+      k8s_upgrade_move_kubeadm_backups:
+        type: bool
+        default: false
+        description:
+          - "Après l'upgrade, déplace les sauvegardes kubeadm de ce passage (/etc/kubernetes/tmp/kubeadm-backup-*) dans <backup_dir>/v<version>/kubeadm/."
+      k8s_upgrade_min_free_mb:
+        type: int
+        default: 1024
+        description:
+          - "Espace libre minimal (Mo) sur les volumes des sauvegardes et de /etc/kubernetes/tmp (où kubeadm écrit pendant l'upgrade). 0 = pas de contrôle."
+      k8s_upgrade_kubeadm_unset_env:
+        type: list
+        elements: str
+        default: [http_proxy, https_proxy, no_proxy, HTTP_PROXY, HTTPS_PROXY, NO_PROXY]
+        description:
+          - "Variables retirées de l'environnement de kubeadm (il recopie le proxy dans les manifests du control plane)."
       k8s_upgrade_prepull_images:
         type: bool
         default: true

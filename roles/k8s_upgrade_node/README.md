@@ -70,6 +70,7 @@ En `--check`, ni drain ni pause.
 | `k8s_upgrade_containerd_socket` | `unix:///run/containerd/containerd.sock` | socket CRI |
 | `k8s_upgrade_remove_container_runtime_flag` | `true` | retire `--container-runtime=remote` |
 | `k8s_upgrade_kubeadm_flags_env` | `/var/lib/kubelet/kubeadm-flags.env` | args kubelet |
+| `k8s_upgrade_kubeadm_unset_env` | `[http_proxy, https_proxy, no_proxy, HTTP_PROXY, HTTPS_PROXY, NO_PROXY]` | variables retirées de l'environnement de kubeadm |
 | `k8s_upgrade_ready_retries` / `_delay` | `60` / `5` | une attente Ready (5 min) |
 | `k8s_upgrade_ready_max_attempts` | `3` | attentes Ready |
 

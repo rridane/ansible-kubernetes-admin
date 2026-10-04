@@ -26,6 +26,27 @@ k8s_upgrade_backup_dir: "/root/k8s-upgrade-backups"
 k8s_upgrade_backup_config: true        # copie de /etc/kubernetes (certs, manifests, kubeconfigs)
 k8s_upgrade_etcd_snapshot: true        # snapshot etcd, sur le primaire, avant apply
 
+# kubeadm sauvegarde etcd et les manifests dans /etc/kubernetes/tmp (chemin figé, ~ la taille du
+# data dir etcd par upgrade, jamais purgé). true => après l'upgrade, les sauvegardes créées par
+# ce passage sont déplacées dans <backup_dir>/v<version>/kubeadm/ (libère le volume de /etc).
+k8s_upgrade_move_kubeadm_backups: false
+
+# Espace libre minimal (Mo) exigé avant sauvegarde et upgrade, sur le volume des sauvegardes
+# (k8s_upgrade_backup_dir) et sur celui de /etc/kubernetes/tmp (où kubeadm écrit sa copie
+# du data dir etcd pendant l'upgrade). 0 => pas de contrôle.
+k8s_upgrade_min_free_mb: 1024
+
+# Variables retirées de l'environnement de chaque commande kubeadm. kubeadm recopie les
+# variables de proxy de son environnement dans les manifests du control plane : l'apiserver
+# passerait alors par le proxy pour joindre webhooks et API agrégées. [] => environnement inchangé.
+k8s_upgrade_kubeadm_unset_env:
+  - http_proxy
+  - https_proxy
+  - no_proxy
+  - HTTP_PROXY
+  - HTTPS_PROXY
+  - NO_PROXY
+
 # Pré-télécharge les images : échoue tôt si le registre/proxy est inaccessible.
 k8s_upgrade_prepull_images: true
 

@@ -59,6 +59,16 @@ k8s_upgrade_containerd_socket: "unix:///run/containerd/containerd.sock"
 k8s_upgrade_remove_container_runtime_flag: true
 k8s_upgrade_kubeadm_flags_env: "/var/lib/kubelet/kubeadm-flags.env"
 
+# Variables retirées de l'environnement de kubeadm (cf. k8s_upgrade_control_plane : kubeadm
+# recopie le proxy de son environnement). [] => environnement inchangé.
+k8s_upgrade_kubeadm_unset_env:
+  - http_proxy
+  - https_proxy
+  - no_proxy
+  - HTTP_PROXY
+  - HTTPS_PROXY
+  - NO_PROXY
+
 # Attente du nœud Ready à la cible après restart du kubelet : une attente =
 # retries × delay (défaut 5 min), répétée jusqu'à ready_max_attempts fois.
 k8s_upgrade_ready_retries: 60

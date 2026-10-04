@@ -162,6 +162,9 @@
   delegate_to: "{{ k8s_primary_cp_host }}"
   register: _k8s_cordon_annotate
   changed_when: true
+  until: _k8s_cordon_annotate.rc == 0
+  retries: 5
+  delay: 5
   when:
     - not _k8s_done
     - k8s_upgrade_drain | bool
@@ -203,7 +206,7 @@
 
 - name: "Upgrade | kubeadm upgrade node (worker : kubelet config)"
   ansible.builtin.command:
-    cmd: kubeadm upgrade node
+    cmd: "{{ _k8s_kubeadm }} upgrade node"
   changed_when: true
   when:
     - not _k8s_done
@@ -233,7 +236,7 @@
 - name: "Adjust | Pause image expected by kubeadm {{ _k8s_upgrade_target }}"
   ansible.builtin.shell: >-
     set -o pipefail;
-    kubeadm config images list --kubernetes-version {{ _k8s_upgrade_target }} 2>/dev/null | grep '/pause:'
+    {{ _k8s_kubeadm }} config images list --kubernetes-version {{ _k8s_upgrade_target }} 2>/dev/null | grep '/pause:'
   args:
     executable: /bin/bash
   register: _k8s_pause_image
@@ -307,6 +310,9 @@
   delegate_to: "{{ k8s_primary_cp_host }}"
   register: _k8s_uncordon
   changed_when: true
+  until: _k8s_uncordon.rc == 0
+  retries: 5
+  delay: 5
   when:
     - k8s_upgrade_uncordon | bool
     - _k8s_cordon_ours
@@ -316,7 +322,11 @@
   ansible.builtin.command:
     cmd: "{{ _k8s_kubectl }} annotate node {{ k8s_upgrade_node_name }} {{ k8s_upgrade_cordon_annotation }}-"
   delegate_to: "{{ k8s_primary_cp_host }}"
+  register: _k8s_unmark
   changed_when: true
+  until: _k8s_unmark.rc == 0
+  retries: 5
+  delay: 5
   when:
     - _k8s_uncordon is not skipped
     - _k8s_cordon_marked or (_k8s_cordon_annotate is changed)

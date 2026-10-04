@@ -36,9 +36,15 @@
 # La clé est la même pour toutes les séries : on la pose UNE fois par cluster, à la main
 # (README, « Pose de la clé »). Ici on vérifie seulement qu'elle est là et valide, AVANT de
 # toucher au dépôt : une clé absente ou expirée (EXPKEYSIG) arrête le rôle, rien n'est modifié.
+# Répertoire gpg temporaire (pas ~/.gnupg, qui peut être sur un disque plein) ; repli sur
+# --list-keys pour les gpg sans --show-keys (< 2.2.8, ex. Ubuntu 18.04).
 - name: "Key | Read {{ k8s_upgrade_apt_keyring }}"
-  ansible.builtin.command:
-    cmd: "gpg --show-keys --with-colons {{ k8s_upgrade_apt_keyring }}"
+  ansible.builtin.shell: |
+    h=$(mktemp -d) && trap 'rm -rf "$h"' EXIT
+    gpg --homedir "$h" --batch --with-colons --show-keys {{ k8s_upgrade_apt_keyring }} 2>&1 ||
+      gpg --homedir "$h" --batch --with-colons --no-default-keyring --keyring {{ k8s_upgrade_apt_keyring }} --list-keys 2>&1
+  args:
+    executable: /bin/bash
   register: _k8s_key_info
   changed_when: false
   check_mode: false
@@ -52,7 +58,8 @@
       - _k8s_key_pub | length > 0
       - _k8s_key_expiry | length == 0 or (_k8s_key_expiry | int) > (ansible_date_time.epoch | int)
     fail_msg: >-
-      {{ (_k8s_key_info.rc != 0 or _k8s_key_pub | length == 0) | ternary('Clé du dépôt absente ou illisible',
+      {{ (_k8s_key_info.rc != 0 or _k8s_key_pub | length == 0) | ternary('Clé du dépôt absente ou illisible (gpg : '
+      ~ (_k8s_key_info.stdout_lines | default([]) | select('match', '^gpg:') | list | join(' / ')) ~ ')',
       'Clé du dépôt expirée le ' ~ ('%Y-%m-%d' | strftime(_k8s_key_expiry | int if _k8s_key_expiry | length > 0 else 0))) }}
       ({{ k8s_upgrade_apt_keyring }}) : apt refuserait le dépôt. Rien n'a été modifié. À poser une fois, sur ce nœud :
       curl -fsSL {{ k8s_upgrade_apt_base_url }}:/<SÉRIE>/deb/Release.key | gpg --dearmor --yes -o {{ k8s_upgrade_apt_keyring }}

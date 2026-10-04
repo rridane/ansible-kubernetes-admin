@@ -106,6 +106,12 @@ argument_specs:
         default: "/var/lib/kubelet/kubeadm-flags.env"
         description:
           - "Fichier d'arguments kubelet écrit par kubeadm."
+      k8s_upgrade_kubeadm_unset_env:
+        type: list
+        elements: str
+        default: [http_proxy, https_proxy, no_proxy, HTTP_PROXY, HTTPS_PROXY, NO_PROXY]
+        description:
+          - "Variables retirées de l'environnement de kubeadm."
       k8s_upgrade_ready_retries:
         type: int
         default: 60

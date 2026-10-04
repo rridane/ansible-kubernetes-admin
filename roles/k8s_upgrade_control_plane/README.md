@@ -25,13 +25,32 @@ déroule ensuite l'upgrade. Les sauvegardes ne sont prises qu'en `apply`, juste 
      saut précédent (pas plus d'une mineure d'écart en HA) ;
    - secondaire : le primaire a déjà appliqué la cible ;
    - kubeadm à la cible ; etcd `endpoint health --cluster` OK.
-3. **Sauvegardes** (mode `apply`) sous `<k8s_upgrade_backup_dir>/v<version>/` : copie de
-   `/etc/kubernetes`, et sur le primaire un **snapshot etcd** (`etcdctl snapshot save` dans
+3. **Disque** (mode `apply`) : contrôle de l'espace libre sur les volumes qui vont recevoir
+   des écritures (`k8s_upgrade_min_free_mb`) : celui des sauvegardes, et celui de
+   `/etc/kubernetes/tmp`, où kubeadm copie le data dir etcd pendant l'upgrade.
+4. **Sauvegardes** (mode `apply`) sous `<k8s_upgrade_backup_dir>/v<version>/` : copie de
+   `/etc/kubernetes` (sans `tmp/`), et sur le primaire un **snapshot etcd** (`etcdctl snapshot save` dans
    le pod etcd, le data dir étant monté au même chemin sur l'hôte, puis déplacé).
-4. **Upgrade** : `kubeadm config images pull`, puis sur le primaire `kubeadm upgrade plan`
-   (affiché) et `kubeadm upgrade apply --yes`, sur les autres `kubeadm upgrade node`.
-5. **Contrôles** : `/readyz` de l'apiserver local, static pods du nœud à la cible et
-   `Ready`, etcd sain, et sur le primaire `kubeadm-config` à la cible.
+5. **Upgrade** : `kubeadm config images pull`, puis sur le primaire `kubeadm upgrade plan`
+   (affiché) et `kubeadm upgrade apply --yes`, sur les autres `kubeadm upgrade node`. Si
+   `k8s_upgrade_move_kubeadm_backups`, les sauvegardes que kubeadm vient de créer dans
+   `/etc/kubernetes/tmp` sont déplacées dans `<k8s_upgrade_backup_dir>/v<version>/kubeadm/`.
+6. **Contrôles** : `/readyz` de l'apiserver local, static pods du nœud à la cible et
+   `Ready`, etcd sain, aucune variable de `k8s_upgrade_kubeadm_unset_env` dans les manifests,
+   et sur le primaire `kubeadm-config` à la cible.
+
+## Proxy et sauvegardes de kubeadm
+
+- **kubeadm recopie les variables de proxy de son environnement** (`http(s)_proxy`, `no_proxy`)
+  dans les manifests de l'apiserver, du controller-manager et du scheduler. Un proxy chargé
+  par la session (ex. `/etc/environment` via sudo) s'y retrouve, et l'apiserver passe par lui
+  pour joindre webhooks et API agrégées (`*.svc`, IP de services). Le rôle lance donc chaque
+  commande kubeadm sans les variables de `k8s_upgrade_kubeadm_unset_env`. kubeadm n'en a pas
+  besoin : les images sont tirées par le runtime (containerd), qui a sa propre configuration.
+- **kubeadm sauvegarde le data dir etcd dans `/etc/kubernetes/tmp`** à chaque upgrade (chemin
+  figé, ~ la taille du data dir, jamais purgé). Il faut donc la place sur ce volume pendant
+  l'upgrade (contrôlé) ; `k8s_upgrade_move_kubeadm_backups` la libère ensuite en déplaçant ces
+  sauvegardes à côté de celles du rôle.
 
 kubeadm ne sait pas redescendre : le snapshot etcd et la copie de `/etc/kubernetes` sont le
 seul retour arrière.
@@ -48,6 +67,9 @@ seul retour arrière.
 | `k8s_upgrade_manifests_dir` | `/etc/kubernetes/manifests` | static pods |
 | `k8s_upgrade_etcd_pki_dir` | `/etc/kubernetes/pki/etcd` | PKI etcd |
 | `k8s_upgrade_backup_dir` | `/root/k8s-upgrade-backups` | racine des sauvegardes |
+| `k8s_upgrade_move_kubeadm_backups` | `false` | déplace les sauvegardes kubeadm du passage vers `<backup_dir>/v<version>/kubeadm/` |
+| `k8s_upgrade_min_free_mb` | `1024` | espace libre minimal (Mo), 0 = pas de contrôle |
+| `k8s_upgrade_kubeadm_unset_env` | `[http_proxy, https_proxy, no_proxy, HTTP_PROXY, HTTPS_PROXY, NO_PROXY]` | variables retirées de l'environnement de kubeadm |
 | `k8s_upgrade_backup_config` | `true` | copie de `/etc/kubernetes` |
 | `k8s_upgrade_etcd_snapshot` | `true` | snapshot etcd (primaire) |
 | `k8s_upgrade_prepull_images` | `true` | pré-téléchargement des images |
